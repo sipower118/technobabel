@@ -1,0 +1,64 @@
+name: Approve
+
+# Move drafts from `drafted` to `approved`, which is what puts them in the
+# publish queue. Takes either explicit fingerprints or the oldest N drafts, so
+# a review can be as coarse or as fine as you like. Touches state.
+on:
+  workflow_dispatch:
+    inputs:
+      fingerprints:
+        description: Space-separated fingerprints. Leave empty to auto-approve the oldest drafts.
+        required: false
+        default: ""
+        type: string
+      count:
+        description: How many of the oldest drafts to approve when no fingerprints are given.
+        required: false
+        default: "2"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared across every stage: they all read-modify-write the one database on
+  # gh-pages, so two at once means the second commit drops the first's work.
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup
+
+      - name: Restore state
+        uses: ./.github/actions/state
+        with:
+          operation: restore
+
+      - name: Show what is waiting
+        run: uv run accelerated-devops list --status draft
+
+      - name: Approve
+        run: |
+          if [ -n "${{ inputs.fingerprints }} ]; then
+            # shellcheck disable=SC2086
+            uv run accelerated-devops approve ${{ inputs.fingerprints }}
+          else
+            # Oldest first, so the publish queue drains in review order.
+            mapfile -t queue < <(uv run accelerated-devops list --status draft \
+              --ids --limit "${{ inputs.count || 2 }}")
+            if [ ${#queue[@]} -eq 0 ]; then
+              echo "nothing left to approve"
+              exit 0
+            fi
+            uv run accelerated-devops approve "${queue[@]}"
+          fi
+
+      - name: Commit state
+        if: always()
+        uses: ./.github/actions/state
+        with:
+          operation: commit
+          message: "approve: queue drafts for publishing"

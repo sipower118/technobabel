@@ -1,0 +1,43 @@
+name: Collect
+
+# Fetch every source into the item pool. Touches state, so it restores the
+# database from gh-pages first and commits it back afterwards.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   # Every 3 hours, off the hour. GitHub cron is UTC and the schedule can be
+  #   # delayed by minutes when the platform is busy, which is fine for a
+  #   # source scrape.
+  #   - cron: "17 */3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  # One stage at a time, across ALL workflows. They share the single SQLite
+  # file on gh-pages, so two of them running together would both restore the
+  # same starting state and the second commit would silently drop the first's
+  # work. GitHub queues the rest rather than cancelling: cancelling a publish
+  # mid-flight is the one outcome Instagram cannot undo.
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Restore states
+        uses: ./.github/actions/state/restore_state.yml
+
+      - name: Collect
+        run: uv run accelerated-devops collect
+
+      - name: Commit state
+        if: always()
+        uses: ./.github/actions/state/commit_state.yml
+        with:
+          operation: commit
+          message: "collect: refresh the item pool"

@@ -1,0 +1,42 @@
+name: commit_state
+
+on:
+  workflow_call:
+
+jobs:
+  save:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout gh-pages branch
+        run: |
+          git fetch origin gh-pages || exit 0
+          git checkout gh-pages || exit 0
+
+      - name: Copy updated SQLite file into gh-pages
+        run: |
+          mkdir -p data
+
+          # Copy updated state.db from the main workspace into gh-pages
+          if [ -f "../data/state.db" ]; then
+            cp ../data/state.db data/state.db
+          else
+            echo "No updated state.db found, skipping."
+            exit 0
+          fi
+
+      - name: Commit updated SQLite file only
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add data/state.db || true
+
+          # If nothing changed, skip commit
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update state.db"
+          git push origin gh-pages

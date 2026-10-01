@@ -1,0 +1,26 @@
+[project]
+name = "accelerated-devops"
+version = "0.1.0"
+description = "Content pipeline that turns DevOps / platform-engineering sources into scheduled Instagram carousels."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "feedparser>=6.0.11",
+    "python-dotenv>=1.0",
+    "pydantic>=2.7",
+    "google-genai>=1.0",
+    "pillow>=10.3",
+    "pre-commit>=4.6.2"
+]
+
+[project.scripts]
+# Hyphenated, not accelerated.devops: a dot in a console-script name becomes
+# ambiguous on Windows (accelerated.devops.exe) and in shells.
+accelerated-devops = "accelerateddevops.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/accelerateddevops"]

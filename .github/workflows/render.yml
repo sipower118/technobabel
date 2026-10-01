@@ -1,0 +1,78 @@
+name: Render
+
+# Re-render the slides for drafts that are waiting, then push them to the
+# gh-pages branch. The push is what makes a render reviewable in a browser and
+# what lets a later publish run fetch the slides back on a clean runner: only
+# the JPEG siblings travel, laid out exactly as the render wrote them,
+# <fingerprint>/<fingerprint>_NN.jpg under the site root.
+on:
+  workflow_dispatch:
+    inputs:
+      fingerprint:
+        description: Re-render and publish one draft. Omit for all pending ones.
+        required: false
+        default: ""
+        type: string
+      status:
+        description: Which drafts to re-render when no fingerprint is given.
+        required: false
+        default: draft
+        type: choice
+        options: [draft, approved, scheduled]
+  # schedule:
+  #   # 06:30 UTC daily, after generate. This is the step that makes a render
+  #   # reviewable in a browser and available to the publish job.
+  #   - cron: "41 6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared across every stage: they all read-modify-write the one database on
+  # gh-pages, so two at once means the second commit drops the first's work.
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup
+
+      - name: Restore state
+        uses: ./.github/actions/state
+        with:
+          operation: restore
+
+      - name: Render slides
+        run: |
+          if [ -n "${{ inputs.fingerprint }}" ]; then
+            uv run accelerated-devops render "${{ inputs.fingerprint }}"
+          else
+            uv run accelerated-devops render --status "${{ inputs.status || 'draft' }}" --limit 10
+          fi
+
+      - name: Stage the slides into the Pages checkout
+        # The CLI only stages the JPEG siblings; it has no write credential.
+        # Staging straight into the .pages checkout means the "Commit state"
+        # step below publishes them in the same commit as the database.
+        env:
+          ASSET_LOCAL_DIR: ${{ github.workspace }}/.pages
+        run: |
+          if [ -n "${{ inputs.fingerprint }}" ]; then
+            uv run accelerated-devops upload-assets "${{ inputs.fingerprint }}"
+          else
+            uv run accelerated-devops upload-assets
+          fi
+
+      - name: Commit state and slides
+        if: always()
+        uses: ./.github/actions/state
+        with:
+          operation: commit
+          message: "render: refresh slides and publish them to the artefact branch"
+
+      - name: Report the public URLs
+        run: echo "review the slides at ${PUBLIC_ASSET_BASE_URL}/<fingerprint>/"
+        # Reachable a minute or so after the push: the CDN picks up a new commit
+        # on its own schedule, which is why the publish step re-checks.

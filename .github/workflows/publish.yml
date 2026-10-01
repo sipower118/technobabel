@@ -1,0 +1,68 @@
+name: Publish
+
+# Post exactly one carousel: the oldest approved draft, or a specific one.
+#
+# "One per run" is deliberate. Instagram has no undo, so a workflow that posted
+# a whole queue would be all-or-nothing; taking a single draft means a failed
+# run can simply be retried without risking a duplicate. The publish queue
+# itself is the `approved` status, so approving a draft is what arms this.
+#
+# The slides are not in the runner: only the JPEG siblings live on the gh-pages
+# artefact branch, and publish_draft fetches them back. Nothing is re-rendered,
+# so the bytes Instagram downloads are the bytes that were reviewed.
+on:
+  workflow_dispatch:
+    inputs:
+      fingerprint:
+        description: Publish this draft instead of the oldest approved one.
+        required: false
+        default: ""
+        type: string
+  # schedule:
+  #   # 09:00 and 17:00 UTC, the two slots the account posts at. Deliberately
+  #   # off the hour: GitHub queues every scheduled workflow at :00 and the queue
+  #   # is long at the top of the hour.
+  #   - cron: "3 9 * * *"
+  #   - cron: "3 17 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared across every stage. Two publishes at once would race for the same
+  # draft and could double-post it, and a manual run overlapping a scheduled
+  # one would restore the same database twice.
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup
+
+      - name: Verify the Instagram token
+        run: uv run accelerated-devops check-token
+
+      - name: Restore state
+        uses: ./.github/actions/state
+        with:
+          operation: restore
+
+      - name: Show the publish queue
+        run: uv run accelerated-devops list --status approved
+
+      - name: Publish one draft
+        run: |
+          if [ -n "${{ inputs.fingerprint }}" ]; then
+            uv run accelerated-devops publish "${{ inputs.fingerprint }}"
+          else
+            uv run accelerated-devops publish
+          fi
+
+      - name: Commit state
+        if: always()
+        uses: ./.github/actions/state
+        with:
+          operation: commit
+          message: "publish: mark the draft as posted"

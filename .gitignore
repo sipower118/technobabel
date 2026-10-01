@@ -147,6 +147,13 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Runtime state: sqlite db, rendered pngs, draft json
+data/
+
+# GitHub Actions checkout of the gh-pages artefact branch (see
+# scripts/pages-state.sh) - never commit the working copy of a branch.
+.pages/
+
 # Environments
 .env
 .envrc

@@ -1,0 +1,50 @@
+name: Generate
+
+# Turn collected items into carousel drafts and render their slides locally.
+# Leaves the drafts in the `drafted` state for review; nothing is approved and
+# nothing is posted. Touches state, so it round-trips the database.
+on:
+  workflow_dispatch:
+    inputs:
+      posts:
+        description: How many drafts to write this run.
+        required: false
+        default: "2"
+        type: string
+  # schedule:
+  #   # 06:00 UTC daily, ahead of the render job. Edit or delete this to control
+  #   # the cadence; drafts are only ever created, never approved or posted.
+  #   - cron: "7 6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared across every stage: they all read-modify-write the one database on
+  # gh-pages, so two at once means the second commit drops the first's work.
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup
+
+      - name: Restore state
+        uses: ./.github/actions/state
+        with:
+          operation: restore
+
+      - name: Generate
+        run: uv run accelerated-devops generate --posts "${{ inputs.posts || 2 }}"
+
+      - name: Show what is waiting for review
+        run: uv run accelerated-devops list
+
+      - name: Commit state
+        if: always()
+        uses: ./.github/actions/state
+        with:
+          operation: commit
+          message: "generate: write new carousel drafts"

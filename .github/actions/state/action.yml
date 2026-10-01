@@ -1,0 +1,92 @@
+name: Pipeline state
+description: >-
+  Move the pipeline's SQLite database between the runner and the gh-pages branch,
+  which doubles as the artefact repository, and commit any assets a stage staged
+  into that same checkout. Call with operation=restore before a stateful stage
+  and operation=commit after it, with `if: always()` on the commit so a failed
+  stage still records what it changed.
+
+inputs:
+  operation:
+    description: Either "restore" or "commit".
+    required: true
+  message:
+    description: Commit message for operation=commit.
+    required: false
+    default: "update pipeline state"
+
+runs:
+  using: composite
+  steps:
+    - name: Check out the state branch
+      if: ${{ inputs.operation == 'restore' }}
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        path: .pages
+        # A brand new repo has no gh-pages branch yet. Nothing to restore then,
+        # and the commit step stands the branch up.
+        continue-on-error: true
+
+    - name: Restore the state
+      if: ${{ inputs.operation == 'restore' }}
+      shell: bash
+      run: |
+        shopt -s nullglob
+        mkdir -p data
+        # The -wal and -shm sidecars come along: a database copied without a
+        # live -wal silently loses the last few transactions.
+        cp -f .pages/state/*.sqlite3* data/ 2>/dev/null || echo "no state on gh-pages yet, starting cold"
+
+    - name: Commit the state and any staged assets
+      if: ${{ inputs.operation == 'commit' }}
+      shell: bash
+      env:
+        MESSAGE: ${{ inputs.message }}
+        # Only needed on the cold-start path below, where there is no checkout
+        # for actions/checkout to have left credentials in.
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+      run: |
+        if [ ! -d .pages/.git ]; then
+          mkdir -p .pages && git -C .pages init -q -b gh-pages
+          git -C .pages remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          # A cold `git init` has none of the auth header checkout writes into
+          # .git/config, so supply it: without this the first-ever run cannot
+          # push. Same credential, same encoding, just set by hand.
+          printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0 |
+            { read -r basic; git -C .pages config \
+                 http.https://github.com/.extraheader "AUTHORIZATION: basic $basic"; }
+        fi
+        mkdir -p .pages/state
+        shopt -s nullglob
+        db=(data/*.sqlite3*)
+        # Store.close() checkpoints the WAL, so a clean run leaves the single
+        # file self-contained; the sidecars are only copied if something is
+        # actually in them.
+        if [ ${#db[@]} -gt 0 ]; then
+          cp -f "${db[@]}" .pages/state/
+          find .pages/state -name '*-wal' -o -name '*-shm' | while read -r f; do
+            [ -s "$f" ] || rm -f "$f"
+          done
+        fi
+
+        # Everything in the checkout is committed, not just state/: the render
+        # workflow stages the JPEG siblings into it (ASSET_LOCAL_DIR points
+        # here) and they have to reach the Pages site in this same commit. The
+        # pipeline code only ever stages them; deploying is a git concern, and
+        # the credentials for it are the ones checkout already left behind.
+        git -C .pages add -A .
+        if git -C .pages diff --cached --quiet; then
+          echo "state unchanged, nothing to commit"
+          exit 0
+        fi
+        # The bot identity is set on the repo rather than inline: a backslash
+        # continuation here would be a line ending trap.
+        git -C .pages config user.name 'github-actions[bot]'
+        git -C .pages config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git -C .pages commit -q -m "$MESSAGE"
+        # Somebody may have moved the branch since the checkout - another run,
+        # or a human. Land on top of it rather than clobbering it.
+        git -C .pages pull -q --rebase origin gh-pages
+        git -C .pages push -q origin HEAD:gh-pages
+        echo "state pushed to gh-pages"

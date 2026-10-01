@@ -1,0 +1,27 @@
+name: restore_state
+
+on:
+  workflow_call:
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout gh-pages branch into .pages
+        run: |
+          git fetch origin gh-pages || exit 0
+          git checkout gh-pages || exit 0
+          mkdir -p .pages
+          cp -r ./* .pages/ || true
+
+      - name: Copy data folder into workspace
+        run: |
+          if [ -d ".pages/data" ]; then
+            mkdir -p data
+            cp -r .pages/data/* data/ || true
+          fi
+
+      - name: Cleanup .pages folder
+        run: |
+          rm -rf .pages || true
