@@ -54,16 +54,16 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   puts `src/` on `sys.path` and chdirs to the repo root, so any of them runs
   from any working directory:
   `.venv\Scripts\python.exe tests\test_<name>.py`
-- `.venv\Scripts\python.exe tests\run_all.py` runs all 13 suites and prints a
+- `.venv\Scripts\python.exe tests\run_all.py` runs all 14 suites and prints a
   PASS/FAIL summary. It judges on **stdout only** — several suites log expected
   errors to stderr on the way past.
 - Suites (each must end in a `... PASSED`/`OK` line): `test_llm` (Gemini ladder),
   `test_pipeline` (E2E with fake LLM), `test_reddit`, `test_publish` (IG 3-step),
-  `test_publish_queue` (FIFO, one-per-run), `test_storage` (local + GitHub Pages
-  asset backends), `test_pages_state` (bash/git state round-trip; skips itself if
+  `test_publish_queue` (FIFO, one-per-run), `test_storage` (local + Pages asset
+  backends), `test_pages_state` (bash/git state round-trip; skips itself if
   no bash), `test_stat`, `test_release`, `test_sources_prompts` (RSS + prompt
-  angles), plus render checks `lint_layout.py`, `check_render.py`,
-  `check_contrast.py`.
+  angles), `check_actions` (workflows reference local actions correctly), plus
+  render checks `lint_layout.py`, `check_render.py`, `check_contrast.py`.
 - `test_stat.py` ends in "N/N … cases pass", `lint_layout.py` in "… clean",
   `check_contrast.py` in "dim accent: none" — `run_all.py`'s `PASS_MARKERS`
   covers all of them; add a marker if a suite changes its ending.

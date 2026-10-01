@@ -37,6 +37,9 @@ jobs:
   render:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
       - uses: ./.github/actions/setup
 
       - name: Restore state

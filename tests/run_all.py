@@ -30,6 +30,7 @@ SUITES = [
     "test_storage.py",
     "test_pages_state.py",
     "test_release.py",
+    "check_actions.py",
     "test_stat.py",
     "lint_layout.py",
     "check_render.py",
