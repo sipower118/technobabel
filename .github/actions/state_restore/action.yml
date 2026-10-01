@@ -1,27 +1,28 @@
-name: restore_state
+name: Restore state
+description: >-
+  Check the gh-pages branch out into .pages and copy the pipeline's SQLite
+  database into data/, so a stage starts from whatever the last stage left
+  behind. The gh-pages branch is also the artefact repository, so this is also
+  what makes the published slides visible to a later publish run.
 
-on:
-  workflow_call:
+runs:
+  using: composite
+  steps:
+    - name: Check out the artefact branch
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        path: .pages
+        # A repository that has never run has no gh-pages branch yet. There is
+        # nothing to restore then, and the commit action stands the branch up.
+        continue-on-error: true
 
-jobs:
-  load:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout gh-pages branch into .pages
-        run: |
-          git fetch origin gh-pages || exit 0
-          git checkout gh-pages || exit 0
-          mkdir -p .pages
-          cp -r ./* .pages/ || true
-
-      - name: Copy data folder into workspace
-        run: |
-          if [ -d ".pages/data" ]; then
-            mkdir -p data
-            cp -r .pages/data/* data/ || true
-          fi
-
-      - name: Cleanup .pages folder
-        run: |
-          rm -rf .pages || true
+    - name: Restore the state
+      shell: bash
+      run: |
+        shopt -s nullglob
+        mkdir -p data
+        # The -wal and -shm sidecars come along: a database copied without a
+        # live -wal silently loses the last few transactions.
+        cp -f .pages/state/*.sqlite3* data/ 2>/dev/null \
+          || echo "no state on gh-pages yet, starting cold"

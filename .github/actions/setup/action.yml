@@ -1,0 +1,115 @@
+name: Setup pipeline
+description: >-
+  Install the CLI with uv and expose the pipeline's configuration to later
+  steps. Every workflow starts here so there is one place that knows how the
+  project is built and which settings it needs.
+
+  Secrets and repository variables cannot be read from inside a composite
+  action - the `secrets` and `vars` contexts only exist in the calling
+  workflow. They are therefore inputs here, and each workflow passes its own
+  values through `with:`. Defaults match what the workflows used to hardcode,
+  so a workflow that only cares about the API keys can pass those alone.
+
+inputs:
+  python-version:
+    description: Python version for the venv.
+    required: false
+    default: "3.12"
+  gemini-api-keys:
+    description: Comma-separated Gemini API key ladder.
+    required: false
+    default: ""
+  ig-user-id:
+    description: Instagram account id, for the Graph API.
+    required: false
+    default: ""
+  ig-access-token:
+    description: Instagram access token, for the Graph API.
+    required: false
+    default: ""
+  reddit-client-id:
+    description: >-
+      Reddit app client id. Optional: RSS and HN carry the account without it,
+      and the collector skips Reddit cleanly when it is unset.
+    required: false
+    default: ""
+  reddit-client-secret:
+    description: Reddit app client secret.
+    required: false
+    default: ""
+  asset-storage:
+    description: >-
+      Asset backend. "local" stages JPEGs in ASSET_LOCAL_DIR for you to host;
+      "pages" stages the same way and verifies the Pages site serves each URL.
+    required: false
+    default: pages
+  asset-local-dir:
+    description: Folder the JPEGs are staged in, relative to the workspace.
+    required: false
+    default: site
+  public-asset-base-url:
+    description: >-
+      Public root every image URL is built from, e.g.
+      https://<owner>.github.io/<repo>. Instagram downloads each slide from
+      here, so it must be reachable from the public internet.
+    required: false
+    default: ""
+  github-pages-branch:
+    description: Which branch the Pages site is served from.
+    required: false
+    default: gh-pages
+  pages-settle-seconds:
+    description: >-
+      How long to wait for the Pages CDN to serve a file before giving up.
+    required: false
+    default: "90"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv and Python
+      uses: astral-sh/setup-uv@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+
+    - name: Install the project
+      run: uv sync --frozen || uv sync
+      shell: bash
+
+    - name: Export the pipeline configuration
+      shell: bash
+      # Inputs are bound to these names here so the run block below is a plain
+      # shell script, and so `:-` defaults behave the way they read.
+      env:
+        GEMINI_API_KEYS: ${{ inputs.gemini-api-keys }}
+        IG_USER_ID: ${{ inputs.ig-user-id }}
+        IG_ACCESS_TOKEN: ${{ inputs.ig-access-token }}
+        REDDIT_CLIENT_ID: ${{ inputs.reddit-client-id }}
+        REDDIT_CLIENT_SECRET: ${{ inputs.reddit-client-secret }}
+        ASSET_STORAGE: ${{ inputs.asset-storage }}
+        ASSET_LOCAL_DIR: ${{ inputs.asset-local-dir }}
+        PUBLIC_ASSET_BASE_URL: ${{ inputs.public-asset-base-url }}
+        GITHUB_PAGES_BRANCH: ${{ inputs.github-pages-branch }}
+        PAGES_SETTLE_SECONDS: ${{ inputs.pages-settle-seconds }}
+        # The workspace path is `github` context, which *is* available in a
+        # composite action, so this one needs no input.
+        DATA_DIR: ${{ github.workspace }}/data
+      run: |
+        # Written to $GITHUB_ENV so later steps in the calling job see them:
+        # a composite action's own `env:` block is scoped to its own steps.
+        echo "GEMINI_API_KEYS=${GEMINI_API_KEYS}"    >> "$GITHUB_ENV"
+        echo "IG_USER_ID=${IG_USER_ID}"              >> "$GITHUB_ENV"
+        echo "IG_ACCESS_TOKEN=${IG_ACCESS_TOKEN}"    >> "$GITHUB_ENV"
+        echo "REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}"      >> "$GITHUB_ENV"
+        echo "REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}" >> "$GITHUB_ENV"
+        echo "ASSET_STORAGE=${ASSET_STORAGE}"        >> "$GITHUB_ENV"
+        echo "ASSET_LOCAL_DIR=${ASSET_LOCAL_DIR}"    >> "$GITHUB_ENV"
+        echo "PUBLIC_ASSET_BASE_URL=${PUBLIC_ASSET_BASE_URL}" >> "$GITHUB_ENV"
+        echo "GITHUB_PAGES_BRANCH=${GITHUB_PAGES_BRANCH}"     >> "$GITHUB_ENV"
+        echo "PAGES_SETTLE_SECONDS=${PAGES_SETTLE_SECONDS}"  >> "$GITHUB_ENV"
+        echo "DATA_DIR=${DATA_DIR}"                  >> "$GITHUB_ENV"
+        # No write credential is exported, because the pipeline code has none
+        # and needs none: committing to the artefact branch is the state
+        # action's job, using the credentials actions/checkout already left in
+        # its .pages checkout.

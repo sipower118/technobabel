@@ -76,14 +76,6 @@ one without touching the others, on a schedule or by hand:
 `approve` is deliberately manual: it is the review gate, and automating it is a
 one-line change (add a `schedule:` block) if you decide you do not want one.
 
-Two composite actions keep the workflows short and the knowledge in one place:
-
-- `.github/actions/setup` — checks out the code, installs with `uv`, and exports
-  the configuration (secrets from the repository secret list, non-secret
-  settings from repository *variables*).
-- `.github/actions/state` — `operation: restore` pulls the database off
-  gh-pages, `operation: commit` pushes it back.
-
 ### gh-pages as the artefact repository
 
 A runner is a fresh machine on every run, so there is no `data/` to inherit.
@@ -96,13 +88,26 @@ state/accelerated_devops.sqlite3          the database
 
 Two composite actions keep the workflows short and the knowledge in one place:
 
+Two composite actions keep the workflows short and the knowledge in one place:
+
 - `.github/actions/setup` — checks out the code, installs with `uv`, and exports
-  the configuration (secrets from the repository secret list, non-secret
-  settings from repository *variables*).
-- `.github/actions/state` — `operation: restore` copies the database off
-  gh-pages, `operation: commit` copies it back, commits the whole checkout
-  (database *and* staged slides) and pushes. The shell for both lives in that
-  one file; it is a `cp`, a `git add`, and a `git push`.
+  the configuration to later steps. It takes the settings as **inputs**: a
+  composite action cannot read the `secrets` or `vars` contexts, because those
+  exist only in the calling workflow. Each workflow therefore passes them
+  through `with:`, which is also why the settings are visible and editable in
+  the workflow file rather than buried in the action.
+- `.github/actions/state_restore` — checks gh-pages out into `.pages` and
+  copies the database into `data/`.
+- `.github/actions/state_commit` — copies the database back, commits the whole
+  checkout (database *and* staged slides) and pushes.
+
+Both are unconditional: one does one thing. Neither takes a credential, and
+neither takes an input that chooses what it does — the push reuses the auth
+header `actions/checkout` already left in the checkout's `.git/config`.
+
+A reusable workflow cannot do this job in place of the action: a called
+workflow's jobs run on *separate* runners, so anything it writes to
+`$GITHUB_ENV` is invisible to the caller.
 
 A rejected push is rebased rather than clobbering whatever moved the branch in
 the meantime. An empty `-wal` is checkpointed away by `Store.close()` and is not

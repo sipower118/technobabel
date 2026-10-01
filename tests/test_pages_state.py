@@ -1,9 +1,10 @@
 """The gh-pages round-trip, by running the composite action's own shell.
 
-The logic lives in `.github/actions/state/action.yml` as two `run:` blocks
-rather than a separate script. That is the right amount of machinery for a few
-git commands, but it does mean the shell is only otherwise tested on CI, so
-these cases extract and execute the real blocks against local git repos.
+The logic lives in `.github/actions/state_restore/action.yml` and
+`.github/actions/state_commit/action.yml` as two `run:` blocks rather than a
+separate script. That is the right amount of machinery for a few git commands,
+but it does mean the shell is only otherwise tested on CI, so these cases
+extract and execute the real blocks against local git repos.
 
 Covers the things that can silently lose state or lose slides: a cold start, an
 unchanged run, and a push rejected because someone else moved the branch.
@@ -21,7 +22,9 @@ import _paths  # noqa: F401  (sys.path + chdir bootstrap)
 
 REPO = Path(__file__).resolve().parents[1]
 BASH = r"C:\Program Files\Git\bin\bash.exe"
-ACTION = REPO / ".github" / "actions" / "state" / "action.yml"
+ACTIONS = REPO / ".github" / "actions"
+RESTORE = ACTIONS / "state_restore" / "action.yml"
+COMMIT = ACTIONS / "state_commit" / "action.yml"
 
 
 def ok(msg: str) -> None:
@@ -46,13 +49,13 @@ def git(*args: str, cwd: Path):
     return run("git", *args, cwd=cwd)
 
 
-def shell_block(title: str) -> str:
-    """Pull one `run:` block out of the composite action by its step name.
+def shell_block(action: Path, title: str) -> str:
+    """Pull one `run:` block out of a composite action by its step name.
 
     Keeps the test honest: it runs the shell the runner will run, so editing
     the action without thinking about this suite changes what is verified.
     """
-    lines = ACTION.read_text(encoding="utf-8").splitlines()
+    lines = action.read_text(encoding="utf-8").splitlines()
     for index, line in enumerate(lines):
         if line.strip() != f"- name: {title}":
             continue
@@ -67,7 +70,7 @@ def shell_block(title: str) -> str:
                     body.append(line[indent + 2:])
                 return "\n".join(body) + "\n"
         break
-    raise AssertionError(f"no run: block found for the '{title}' step in {ACTION}")
+    raise AssertionError(f"no run: block found for the '{title}' step in {action}")
 
 
 def sandbox(root: Path, origin: Path, *, with_branch: bool = True) -> Path:
@@ -92,9 +95,6 @@ def env_for(root: Path, origin: Path) -> dict:
         **os.environ,
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "example/technobabel",
-        # The action reads this on the cold-start path, where there is no
-        # checkout to have left credentials behind.
-        "GH_TOKEN": "ghs_test",
         "GIT_AUTHOR_NAME": "t",
         "GIT_AUTHOR_EMAIL": "t@example.com",
         "GIT_COMMITTER_NAME": "t",
@@ -108,8 +108,8 @@ def main() -> int:
         print(f"SKIP: no bash at {BASH}")
         return 0
 
-    restore = shell_block("Restore the state")
-    commit = shell_block("Commit the state and any staged assets")
+    restore = shell_block(RESTORE, "Restore the state")
+    commit = shell_block(COMMIT, "Commit the state and any staged assets")
 
     root = Path(tempfile.mkdtemp(prefix="state-action-"))
     try:

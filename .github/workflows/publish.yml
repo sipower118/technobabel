@@ -43,14 +43,23 @@ jobs:
         uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup
+        with:
+          gemini-api-keys: ${{ secrets.GEMINI_API_KEYS }}
+          ig-user-id: ${{ secrets.IG_USER_ID }}
+          ig-access-token: ${{ secrets.IG_ACCESS_TOKEN }}
+          reddit-client-id: ${{ secrets.REDDIT_CLIENT_ID }}
+          reddit-client-secret: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          asset-storage: ${{ vars.ASSET_STORAGE || 'pages' }}
+          asset-local-dir: ${{ vars.ASSET_LOCAL_DIR || 'site' }}
+          public-asset-base-url: ${{ vars.PUBLIC_ASSET_BASE_URL }}
+          github-pages-branch: ${{ vars.GITHUB_PAGES_BRANCH || 'gh-pages' }}
+          pages-settle-seconds: ${{ vars.PAGES_SETTLE_SECONDS || '90' }}
 
       - name: Verify the Instagram token
         run: uv run accelerated-devops check-token
 
       - name: Restore state
-        uses: ./.github/actions/state
-        with:
-          operation: restore
+        uses: ./.github/actions/state_restore
 
       - name: Show the publish queue
         run: uv run accelerated-devops list --status approved
@@ -65,7 +74,6 @@ jobs:
 
       - name: Commit state
         if: always()
-        uses: ./.github/actions/state
+        uses: ./.github/actions/state_commit
         with:
-          operation: commit
           message: "publish: mark the draft as posted"

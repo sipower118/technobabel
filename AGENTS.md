@@ -90,12 +90,40 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
 
   **The app holds no write credential and never calls the GitHub API.** It stages
   files and reads public URLs, nothing else. Deploying to `gh-pages` is git, and
-  it belongs to `.github/actions/state`: the render workflow sets
-  `ASSET_LOCAL_DIR` to the `.pages` checkout for the staging step, and the
-  commit step (`git -C .pages add -A .`) pushes the slides and the database in
-  one commit using the credentials `actions/checkout` already left in
-  `.pages/.git/config`. No `GITHUB_TOKEN` secret or PAT exists, and `setup`
-  exports none. Don't reintroduce one.
+  it belongs to `.github/actions/state_commit`: the render workflow sets
+  `ASSET_LOCAL_DIR` to the `.pages` checkout for the staging step, and
+  `git -C .pages add -A .` pushes the slides and the database in one commit
+  using the auth header `actions/checkout` already left in `.pages/.git/config`.
+  No `GITHUB_TOKEN` secret or PAT exists, and `setup` exports none. Don't
+  reintroduce one.
+
+## Actions layout (hard-won constraint)
+- **Composite actions cannot read `secrets` or `vars`.** Those contexts exist
+  only in the calling workflow; inside `.github/actions/*/action.yml` the
+  expression silently evaluates to an **empty string** rather than failing. The
+  pipeline reads its config from env, so an empty secret means an
+  unauthenticated push or a broken public URL, not an error. Everything is
+  therefore an `inputs:` entry on `setup/action.yml` and each workflow passes
+  it through `with:`. `github` context (including `github.token` and
+  `github.workspace`) *is* available in a composite action.
+- A reusable workflow (`on: workflow_call`) **cannot** replace the setup action.
+  A called workflow's jobs run on separate runners, so its `$GITHUB_ENV` writes
+  never reach the caller's later steps. It would have to be the *entire* job.
+- Also invalid in `actions/`: a file with `on: workflow_call` and `jobs:` and no
+  `runs:`. `uses:` on it fails at load time with a misleading "can't find
+  action.yml"-style error.
+- `tests/check_actions.py` guards all of this: local `uses:` must point at a
+  directory, `actions/checkout` must precede them, every `actions/*/action.yml`
+  must parse and have `runs.using: composite`, and none may reference
+  `${{ secrets.`/`${{ vars.`, that no action declares a mode input (`operation`,
+  `mode`, ...) and none takes a git credential. Add a rule there rather than
+  relying on review.
+- **One action, one job.** `.github/actions/state` used to be one action with
+  `operation: restore|commit`, which meant `if: inputs.operation == ...` on
+  every step and a workflow that could not say what would run. It is now
+  `state_restore` and `state_commit`, both unconditional. Same reason the setup
+  action takes settings as inputs rather than reading contexts: dispatch belongs
+  in the workflow file, where it is visible.
 
 ## Architecture
 - Flow: collect → select → generate → render → approve → schedule → publish,
@@ -155,17 +183,21 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   (`cli._is_private_host`).
 - GitHub Actions runners are **ephemeral**, so state lives on `gh-pages`, not in
   `data/`: `<fp>/<fp>_NN.jpg` (the published slides) plus `state/*.sqlite3`. The
-  round-trip is the two `run:` blocks in `.github/actions/state/action.yml` —
-  deliberately inline, not a script; it is a `cp`, a `git add`, a `git push`.
+  round-trip is the `run:` block in each of
+  `.github/actions/state_restore/action.yml` and
+  `.github/actions/state_commit/action.yml` — deliberately inline, not a script;
+  it is a `cp`, a `git add`, a `git push`.
   `Store.close()` checkpoints the WAL (TRUNCATE) so the committed single file is
-  self-contained, but the action still copies a non-empty `-wal` because a crash
-  can leave one. `tests/test_pages_state.py` extracts those `run:` blocks and
-  executes them against real git repos, so the shell is not only tested on CI.
+  self-contained, but the commit action still copies a non-empty `-wal` because
+  a crash can leave one. `tests/test_pages_state.py` extracts those `run:`
+  blocks and executes them against real git repos, so the shell is not only
+  tested on CI.
 - The `state/` dir is inside the *published* Pages site, so the DB is public.
   No credentials in it, but do not treat it as private.
 - Each pipeline stage is a separate workflow (`.github/workflows/*.yml`) sharing
-  `.github/actions/setup` (uv install + env from secrets/variables) and
-  `.github/actions/state`. `approve`/`reject` are manual-only on purpose — that
+  `.github/actions/setup` (uv install + env export), `.github/actions/state_restore`
+  and `.github/actions/state_commit`.
+  `approve`/`reject` are manual-only on purpose — that
   is the review gate.
 - Repo prerequisites the workflows cannot set themselves: Pages configured to
   deploy from `gh-pages`/root, and Actions workflow permissions set to

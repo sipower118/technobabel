@@ -1,42 +1,66 @@
-name: commit_state
+name: Commit state
+description: >-
+  Copy the pipeline's database into the .pages checkout, commit it together with
+  any slides a stage staged there, and push to gh-pages. Call with `if: always()`
+  so a stage that failed partway still records what it changed.
 
-on:
-  workflow_call:
+inputs:
+  message:
+    description: Commit message.
+    required: false
+    default: "update pipeline state"
 
-jobs:
-  save:
-    runs-on: ubuntu-latest
+runs:
+  using: composite
+  steps:
+    - name: Commit the state and any staged assets
+      shell: bash
+      env:
+        MESSAGE: ${{ inputs.message }}
+      run: |
+        # On the very first run there is no .pages checkout, because restore had
+        # no gh-pages branch to check out. Stand the branch up here.
+        if [ ! -d .pages/.git ]; then
+          mkdir -p .pages
+          git -C .pages init -q -b gh-pages
+          git -C .pages remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          # A cold `git init` has none of the auth that actions/checkout writes
+          # into .git/config, so copy that same header across from the workspace
+          # checkout rather than holding a credential of our own.
+          header=$(git config --get http.https://github.com/.extraheader || true)
+          [ -n "$header" ] && git -C .pages config http.https://github.com/.extraheader "$header"
+        fi
 
-    steps:
-      - name: Checkout gh-pages branch
-        run: |
-          git fetch origin gh-pages || exit 0
-          git checkout gh-pages || exit 0
+        mkdir -p .pages/state
+        shopt -s nullglob
+        db=(data/*.sqlite3*)
+        # Store.close() checkpoints the WAL, so a clean run leaves the single
+        # file self-contained; the sidecars are only copied if something is
+        # actually in them.
+        if [ ${#db[@]} -gt 0 ]; then
+          cp -f "${db[@]}" .pages/state/
+          find .pages/state \( -name '*-wal' -o -name '*-shm' \) -size 0 -delete
+        fi
 
-      - name: Copy updated SQLite file into gh-pages
-        run: |
-          mkdir -p data
-
-          # Copy updated state.db from the main workspace into gh-pages
-          if [ -f "../data/state.db" ]; then
-            cp ../data/state.db data/state.db
-          else
-            echo "No updated state.db found, skipping."
-            exit 0
-          fi
-
-      - name: Commit updated SQLite file only
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-          git add data/state.db || true
-
-          # If nothing changed, skip commit
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-
-          git commit -m "Update state.db"
-          git push origin gh-pages
+        # The whole checkout is committed, not just state/: the render workflow
+        # stages the JPEG siblings into it (ASSET_LOCAL_DIR points here) and
+        # they have to reach the Pages site in this same commit.
+        git -C .pages add -A .
+        if git -C .pages diff --cached --quiet; then
+          echo "state unchanged, nothing to commit"
+          exit 0
+        fi
+        # Set on the repo rather than inline: a backslash continuation here
+        # would be a line-ending trap.
+        git -C .pages config user.name 'github-actions[bot]'
+        git -C .pages config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git -C .pages commit -q -m "$MESSAGE"
+        # Somebody may have moved the branch since restore checked it out - a
+        # concurrent run, or a human. Land on top of it rather than clobbering
+        # it. Skipped on the first run, where there is no remote branch to
+        # rebase onto and the push below is what creates it.
+        if git -C .pages ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+          git -C .pages pull -q --rebase origin gh-pages
+        fi
+        git -C .pages push -q origin HEAD:gh-pages
+        echo "state pushed to gh-pages"
