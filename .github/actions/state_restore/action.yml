@@ -37,6 +37,10 @@ runs:
         fi
 
     - name: Check out the artefact branch
+      # No `continue-on-error` here on purpose. The only expected failure - a
+      # branch that does not exist yet - is decided above, so anything that goes
+      # wrong below means the state we know exists could not be read, and
+      # running the stage cold on top of it would be worse than stopping.
       if: steps.branch.outputs.present == 'true'
       uses: actions/checkout@v4
       with:

@@ -536,7 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_collect)
 
     p = sub.add_parser("generate", help="write drafts for the best new items")
-    p.add_argument("--limit", type=int, help="max drafts this run")
+    # --posts is the same option as on `run`, so `generate --posts 3` and
+    # `run --posts 3` mean the same thing.
+    p.add_argument("--limit", "--posts", dest="limit", type=int, help="max drafts this run")
     p.add_argument("--approve", action="store_true", help="auto-approve the drafts")
     p.set_defaults(func=cmd_generate)
 

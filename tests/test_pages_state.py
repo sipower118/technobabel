@@ -103,6 +103,19 @@ def env_for(root: Path, origin: Path) -> dict:
     }
 
 
+def probe_for(action: Path, title: str, env: dict, cwd: Path) -> tuple[int, str]:
+    """Run the restore action's branch probe and return (exit code, output).
+
+    The probe is the only part of the round-trip that has to tell three states
+    apart - the branch exists, the branch does not exist, and the question could
+    not be asked - and GitHub is the only place that runs it otherwise.
+    """
+    script = cwd / "_probe.sh"
+    script.write_text(shell_block(action, title), encoding="utf-8", newline="\n")
+    result = run(BASH, str(script), cwd=cwd, env=env, check=False)
+    return result.returncode, result.stdout + result.stderr
+
+
 def main() -> int:
     if not Path(BASH).exists():
         print(f"SKIP: no bash at {BASH}")
@@ -128,6 +141,49 @@ def main() -> int:
             script = root / "_commit.sh"
             script.write_text(commit, encoding="utf-8", newline="\n")
             return run(BASH, str(script), cwd=root, env=env).stdout
+
+        # ── 0. the probe distinguishes "absent" from "could not ask" ─────
+        # This is the step that decides whether the checkout runs at all. If it
+        # reads a transport failure as "absent", the stage starts cold on state
+        # that does exist and the commit afterwards overwrites it.
+        probe_env = {**env, "GITHUB_OUTPUT": str(root / "probe_output")}
+        probe_repo = root / "probe-repo"
+        probe_repo.mkdir()
+        git("init", "-q", "-b", "main", cwd=probe_repo)
+        git("remote", "add", "origin", str(origin), cwd=probe_repo)
+
+        def probe() -> tuple[int, str]:
+            (root / "probe_output").write_text("", encoding="utf-8")
+            status, out = probe_for(RESTORE, "Look for the artefact branch",
+                                    probe_env, probe_repo)
+            declared = (root / "probe_output").read_text(encoding="utf-8").strip()
+            return status, f"{out}\n{declared}"
+
+        # origin.git has gh-pages (the sandbox pushed it), so the probe finds it.
+        status, out = probe()
+        assert status == 0, out
+        assert "present=true" in out, out
+        print("OK   restore: the probe finds gh-pages when the branch exists")
+
+        # A second origin with no gh-pages: exactly this repository's state.
+        bare = root / "cold.git"
+        git("init", "--bare", "-q", "-b", "main", str(bare), cwd=root)
+        git("remote", "set-url", "origin", str(bare), cwd=probe_repo)
+        status, out = probe()
+        assert status == 0, out
+        assert "present=false" in out, out
+        assert "present=true" not in out, out
+        print("OK   restore: a missing gh-pages branch is a cold start, not an error")
+
+        # A path that does not exist stands in for auth or network failure.
+        git("remote", "set-url", "origin", str(root / "nowhere.git"), cwd=probe_repo)
+        status, out = probe()
+        assert status != 0, f"a probe it could not trust must fail loudly: {out}"
+        assert "present=" not in out, (
+            "an unreachable origin must not be reported as 'absent' - that would "
+            f"start the stage cold over state that exists: {out}"
+        )
+        print("OK   restore: an unaskable probe fails rather than starting cold")
 
         # ── 1. a run that changed nothing commits nothing ────────────────
         out = commit_state()
