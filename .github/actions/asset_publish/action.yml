@@ -1,22 +1,22 @@
 name: Publish assets
 description: Copy rendered images into gh-pages
 
-inputs: {}
-
 runs:
   using: "composite"
   steps:
     - name: Checkout gh-pages into .pages
-      continue-on-error: true
       uses: actions/checkout@v4
+      continue-on-error: true
       with:
         ref: gh-pages
         path: .pages
 
     - name: Ensure output folder exists
+      shell: bash
       run: mkdir -p .pages/output
 
     - name: Copy rendered assets
+      shell: bash
       run: |
         if [ -d "data/output" ]; then
           cp -r data/output/* .pages/output/
@@ -25,6 +25,7 @@ runs:
         fi
 
     - name: Commit assets
+      shell: bash
       run: |
         cd .pages
         git config user.name "github-actions"
