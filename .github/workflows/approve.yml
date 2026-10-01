@@ -54,7 +54,7 @@ jobs:
 
       - name: Approve
         run: |
-          if [ -n "${{ inputs.fingerprints }} ]; then
+          if [ -n "${{ inputs.fingerprints }}" ]; then
             # shellcheck disable=SC2086
             uv run accelerated-devops approve ${{ inputs.fingerprints }}
           else
