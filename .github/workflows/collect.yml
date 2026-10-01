@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup
-        uses: ./.github/actions/setup
+        uses: ./.github/workflows/setup.yml
 
       - name: Restore state
         uses: ./.github/actions/state_restore
