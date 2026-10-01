@@ -688,7 +688,11 @@ def render_draft(
     tagline: str = "",
     palette_name: str | None = None,
 ) -> list[Path]:
-    """Render every slide of a draft; returns the written file paths."""
+    """Render every slide of a draft as JPEG; returns the written file paths.
+
+    Instagram accepts JPEG only, so the extension is part of the render: what
+    lands here is exactly what a publish URL points at.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -707,9 +711,19 @@ def render_draft(
             total=total,
             seed=seed,
         )
-        path = output_dir / f"{draft.fingerprint}_{index + 1:02d}.png"
-        # Optimise: IG re-encodes anyway, and smaller files upload faster.
-        image.save(path, "PNG", optimize=True)
+        # Instagram accepts JPEG only for image posts, so the slide is written
+        # as one here instead of being converted somewhere on the way out.
+        # subsampling=0 keeps chroma at full resolution, which is what stops
+        # accent-coloured text bleeding into the background around its edges.
+        path = output_dir / f"{draft.fingerprint}_{index + 1:02d}.jpg"
+        frame = image if image.mode == "RGB" else image.convert("RGB")
+        frame.save(path, "JPEG", quality=92, subsampling=0, optimize=True)
+        # An earlier render of the same slide left a PNG of it behind; keeping
+        # both would make the output directory disagree with itself about the
+        # format every URL is built from.
+        stale = path.with_suffix(".png")
+        if stale.exists():
+            stale.unlink()
         paths.append(path)
 
     log.info("rendered %d slides for %s", len(paths), draft.fingerprint)

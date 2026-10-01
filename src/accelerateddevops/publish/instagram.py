@@ -215,11 +215,11 @@ class InstagramPublisher:
     def image_urls(self, draft: Draft) -> list[str]:
         """URL of every slide of `draft`, in order, as the site serves them.
 
-        A pure function of the base URL and the fingerprint. The renderer writes
-        `<fingerprint>/<fingerprint>_NN.png` under the output directory and the
-        Pages branch keeps that same layout with `.jpg`, so there is nothing to
-        stage, convert, upload or wait on - the URL is already correct before
-        this method is called.
+        A pure function of the base URL and the fingerprint. The renderer
+        already writes `<fingerprint>/<fingerprint>_NN.jpg` under the output
+        directory and the Pages site serves that same layout, so the URL is
+        correct before this method is called - nothing to stage, convert,
+        upload or wait on.
         """
         base = (self.settings.assets.base_url or "").rstrip("/")
         if not base:
@@ -230,7 +230,7 @@ class InstagramPublisher:
             )
         if not draft.slides:
             raise PublishError(
-                f"{draft.fingerprint} has no slides; render it before publishing"
+                f"{draft.fingerprint} has no slides; generate it first"
             )
         stem = draft.fingerprint
         return [

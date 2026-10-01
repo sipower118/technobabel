@@ -127,8 +127,8 @@ ok("caption: only the carousel parent carries the caption, not the items")
 # Regression: dropping the fingerprint directory (or naming the file by itself)
 # is a 404, and Meta reports a 404 as 9004/2207052 "Only photo or video can be
 # accepted as media type". The renderer writes
-# <fingerprint>/<fingerprint>_NN.png under output_dir, and gh-pages keeps that
-# same layout with .jpg - so that is exactly what has to be handed to Instagram.
+# <fingerprint>/<fingerprint>_NN.jpg under output_dir and gh-pages serves that
+# same layout - so that is exactly what has to be handed to Instagram.
 urls = [c[2]["image_url"] for c in items]
 expected = [f"{BASE}/{fp}/{fp}_{n:02d}.jpg" for n in range(1, 4)]
 assert urls == expected, f"got {urls}, want {expected}"

@@ -205,9 +205,9 @@ accelerated-devops check-token
 That calls `graph.instagram.com/me` with the token from `.env` and prints the
 account it belongs to.
 
-Publishing details worth knowing: images must be **JPEG** on the site (the
-renderer writes PNG, so the deployed files are JPEG siblings), Instagram fetches
-them from the public URL in `PUBLIC_ASSET_BASE_URL`, and a carousel is three
+Publishing details worth knowing: the renderer writes **JPEG**, the only format
+Instagram accepts for image posts, and Instagram fetches those files from the
+public URL in `PUBLIC_ASSET_BASE_URL`; a carousel is three
 steps (item containers → a `CAROUSEL` parent → `/media_publish`). If an item
 creation fails, the publisher cleans up the containers it created best-effort;
 containers Instagram cannot delete expire on their own within 24 hours.
@@ -227,10 +227,10 @@ derives one URL per slide and hands those to Instagram:
 ```
 
 That is exactly the layout the renderer writes under `data/output/`, so getting
-the slides onto the site is one deployment step outside the app: convert each
-`<fp>_NN.png` to `<fp>_NN.jpg` and commit it to `gh-pages` under its own
-fingerprint directory. The app holds no write credential and never talks to the
-GitHub API, so that push is yours (or a workflow's) to make.
+the slides onto the site is one deployment step outside the app: copy each
+`<fp>_NN.jpg` to `gh-pages` under its own fingerprint directory. The app holds
+no write credential and never talks to the GitHub API, so that push is yours
+(or a workflow's) to make.
 
 One-time setup: repo **Settings → Pages → Deploy from a branch** → `gh-pages` /
 `/ (root)`. The branch itself is created automatically by the first state commit.
@@ -467,7 +467,7 @@ transient LLM outage does not silently eat the queue.
 fingerprint      sha1 of (source url, first headline) - stable id for CLI + folders
 source_fingerprint  link back to the source_items row
 caption, hashtags, slides, alt_text, cover_layout, sources_note
-image_paths      where the rendered PNGs live on disk
+image_paths      where the rendered JPEGs live on disk
 status           draft -> approved -> scheduled -> published
 scheduled_for, published_at, instagram_media_id, permalink, error
 ```
@@ -491,7 +491,7 @@ Used to see the pipeline's behaviour over time; not queried by any command.
 
 ### What is NOT in the database
 
-The slides themselves. Rendered images are PNG files under
+The slides themselves. Rendered images are JPEG files under
 `data/output/<fingerprint>/`; the database only stores their paths, and a
 publish run never reads them — it derives the public URL for each slide from the
 fingerprint. No draft JSON files are written to disk — the old "data/drafts"

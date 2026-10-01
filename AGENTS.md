@@ -93,10 +93,12 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   using the auth header `actions/checkout` already left in
   `.pages/.git/config`. No `GITHUB_TOKEN` secret or PAT exists, and `setup`
   exports none. Don't reintroduce one.
-- Nothing in the pipeline writes JPEGs any more: `publish/storage.py`,
-  `to_jpeg()`, `fetch_slides()` and the `upload-assets` subcommand are deleted.
-  Getting `<fp>_NN.jpg` onto `gh-pages` is outside this app, so if the site has
-  no JPEGs, `publish` gets a 404 that Meta reports as
+- The renderer writes JPEG directly (`render_draft`: quality 92, subsampling 0),
+  because that is the only format Instagram accepts — there is no conversion
+  step anywhere: `publish/storage.py`, `to_jpeg()`, `fetch_slides()` and the
+  `upload-assets` subcommand are deleted. Getting `<fp>_NN.jpg` onto `gh-pages`
+  is still outside this app, so if the site has no JPEGs, `publish` gets a 404
+  that Meta reports as
   `9004 / 2207052 "Only photo or video can be accepted as media type"`.
 
 ## Actions layout (hard-won constraint)
@@ -131,7 +133,7 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
 - Flow: collect → select → generate → render → approve → schedule → publish,
   orchestrated in `pipeline.py`, exposed as CLI subcommands in `cli.py`.
 - All state is one SQLite file `data/accelerated_devops.sqlite3` (WAL mode;
-  `-wal/-shm` sidecars are part of it). Rendered images are PNG files under
+  `-wal/-shm` sidecars are part of it). Rendered images are JPEG files under
   `data/output/<fingerprint>/` — the DB stores paths only, and no draft JSON
   files are written (the old "drafts_dir" is unused). `data/` is gitignored.
 - LLM ladder in `llm/gemini.py`: models × keys with per-model cooldowns persisted
@@ -145,8 +147,8 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
 - `llm/prompts.py` builds prompts via `.format()` — any added prose must contain
   **no literal braces** or the prompt breaks at runtime.
 - Instagram uses the Instagram-Login (Business Meta app) path: carousel = 3 API
-  steps, the images on the site must be JPEG, IG Login cannot delete containers
-  (they self-expire in 24h).
+  steps, the renderer writes JPEG (the only format IG accepts), IG Login cannot
+  delete containers (they self-expire in 24h).
 - `publish/instagram.py` owns every URL: `image_urls(draft)` is
   `<PUBLIC_ASSET_BASE_URL>/<fp>/<fp>_NN.jpg` for each slide, 1-based and in
   order. Never the bare file name — renders live in a per-fingerprint
@@ -195,9 +197,11 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   deploy from `gh-pages`/root, and Actions workflow permissions set to
   read+write. The commit step rebase-then-pushes, so a `concurrency: pipeline`
   group is belt-and-braces, not the thing keeping the branch consistent.
-- Deploying the slides is your step: nothing in the repo converts PNG→JPEG or
-  writes to `gh-pages` any more. If publishing 9004s with a URI that plainly
-  should exist, check the file really is at `<fp>/<fp>_NN.jpg` on the site.
+- Deploying the slides is your step: the renderer writes the JPEGs, but nothing
+  in the repo pushes them to `gh-pages`. If publishing 9004s with a URI that
+  plainly should exist, check the file really is at `<fp>/<fp>_NN.jpg` on the
+  site. A draft last rendered before the JPEG switch keeps a stale `.png`
+  beside it until it is re-rendered; `render` deletes that sibling.
 - The agent cannot view rendered images; verify layout via `tests/lint_layout.py` /
   `tests/check_render.py` / `tests/check_contrast.py`, never by assumption.
 - Changing `DEFAULT_FEEDS`/scoring in `sources/rss.py` implies updating

@@ -16,7 +16,7 @@ import _paths  # noqa: F401  (sys.path + chdir bootstrap)
 from accelerateddevops.render.theme import CANVAS_H, CANVAS_W, MARGIN, PALETTES, pick_palette, seed_for
 
 d = Path("data/output/_smoke")
-files = sorted(p for p in d.glob("*.png") if not p.name.startswith("_"))
+files = sorted(p for p in d.glob("*.jpg") if not p.name.startswith("_"))
 print("files:", len(files))
 assert files, "no slides rendered"
 
