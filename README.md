@@ -345,6 +345,12 @@ Two details worth knowing:
 - **The `stat` layout validates its own number.** If the model hands it a phrase
   instead of a figure, it falls back to `bullets` rather than rendering
   "fewer outages" as if it were data.
+- **The closing pill on a `cta` slide is written by the model**, one line per
+  story naming what to do with it. There is no canned fallback: if the model
+  leaves it empty the slide renders without a pill rather than showing a
+  generic "save this" line that ignores the content.
+- **No progress dots.** Instagram already draws its own carousel indicator, so
+  the renderer does not add a second one.
 
 Each post gets a deterministic seed derived from its fingerprint: re-rendering
 a draft reproduces it exactly, while consecutive posts differ.

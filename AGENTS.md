@@ -169,6 +169,18 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   votes) and discounts RSS items (no real interaction data) so proven-popular
   HN/Reddit stories win; it then normalises per source before ranking.
   HN ranks by points, Reddit by comments.
+- Hard text rule: **no long dash character in a post**. `models.plain_dashes`
+  flattens figure/en/em dashes and the horizontal bar to `-`, called at the
+  three boundaries where text enters or leaves: `llm/gemini.py:_parse`
+  (generation), `Slide.from_dict` (drafts stored before the rule existed), and
+  `Draft.full_caption` (the exact string sent to Meta). Add a call there rather
+  than cleaning a string by hand.
+- The closing pill on a `cta` slide is model-written: `Slide.cta` is declared in
+  `_SLIDE_SCHEMA` and specified in `llm/prompts.py`. `_layout_cta` draws **no
+  pill at all** when it is empty — the old canned fallback ("save this for the
+  next incident review") is deliberately gone, because it was not always in
+  keeping with the content. Progress dots are gone for the same reason: Instagram
+  draws its own carousel indicator.
 
 ## Gotchas
 - `src/` is tracked, so `git diff` shows source changes. `data/` is not.
