@@ -140,8 +140,7 @@ cli.InstagramPublisher = _RecordingPublisher  # type: ignore[assignment]
 settings = Settings(
     data_dir=DATA_DIR,
     instagram=InstagramConfig("1789", "tok", None),
-    assets=AssetConfig(storage="local", base_url="https://example.test/repo",
-                       local_dir=DATA_DIR / "site"),
+    assets=AssetConfig(base_url="https://example.test/repo"),
 )
 
 # Reset the queue to three approved drafts, oldest first.

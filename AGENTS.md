@@ -37,7 +37,7 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   script is hyphenated `accelerated-devops`; the Python module is
   `accelerateddevops`, package root `src/`.
 - Subcommands: `collect generate render list approve reject schedule publish
-  upload-assets check-token run daemon doctor`. `generate run` only draft unless
+  check-token run daemon doctor`. `generate run` only draft unless
   `--approve`. `doctor` reports exactly what config is missing.
 - `publish` with no args posts **exactly one** draft: `Store.next_approved()`,
   the oldest `approved` row by `created_at`. This is the CI contract — a
@@ -54,16 +54,16 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   puts `src/` on `sys.path` and chdirs to the repo root, so any of them runs
   from any working directory:
   `.venv\Scripts\python.exe tests\test_<name>.py`
-- `.venv\Scripts\python.exe tests\run_all.py` runs all 14 suites and prints a
+- `.venv\Scripts\python.exe tests\run_all.py` runs all 13 suites and prints a
   PASS/FAIL summary. It judges on **stdout only** — several suites log expected
   errors to stderr on the way past.
 - Suites (each must end in a `... PASSED`/`OK` line): `test_llm` (Gemini ladder),
   `test_pipeline` (E2E with fake LLM), `test_reddit`, `test_publish` (IG 3-step),
-  `test_publish_queue` (FIFO, one-per-run), `test_storage` (local + Pages asset
-  backends), `test_pages_state` (bash/git state round-trip; skips itself if
-  no bash), `test_stat`, `test_release`, `test_sources_prompts` (RSS + prompt
-  angles), `check_actions` (workflows reference local actions correctly), plus
-  render checks `lint_layout.py`, `check_render.py`, `check_contrast.py`.
+  `test_publish_queue` (FIFO, one-per-run), `test_pages_state` (bash/git state
+  round-trip; skips itself if no bash), `test_stat`, `test_release`,
+  `test_sources_prompts` (RSS + prompt angles), `check_actions` (workflows
+  reference local actions correctly), plus render checks `lint_layout.py`,
+  `check_render.py`, `check_contrast.py`.
 - `test_stat.py` ends in "N/N … cases pass", `lint_layout.py` in "… clean",
   `check_contrast.py` in "dim accent: none" — `run_all.py`'s `PASS_MARKERS`
   covers all of them; add a marker if a suite changes its ending.
@@ -82,20 +82,22 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   broken upstream (silent failure); the Devvit portal (developers.reddit.com)
   does NOT issue Data API client id/secret.
 - Publishing requires `PUBLIC_ASSET_BASE_URL`; without it publishing fails loudly
-  by design. There is **no local web server any more** — `serve-assets` and
-  `publish/assets.py` are deleted, along with the cloudflared tunnel ritual. The
-  `ASSET_STORAGE` switch in `.env` picks the host: `local` stages JPEGs in
-  `ASSET_LOCAL_DIR` (default `site/`) for you to host, `pages` stages the same
-  way and then verifies the site serves each URL. See `publish/storage.py`.
-
-  **The app holds no write credential and never calls the GitHub API.** It stages
-  files and reads public URLs, nothing else. Deploying to `gh-pages` is git, and
-  it belongs to `.github/actions/state_commit`: the render workflow sets
-  `ASSET_LOCAL_DIR` to the `.pages` checkout for the staging step, and
-  `git -C .pages add -A .` pushes the slides and the database in one commit
-  using the auth header `actions/checkout` already left in `.pages/.git/config`.
-  No `GITHUB_TOKEN` secret or PAT exists, and `setup` exports none. Don't
-  reintroduce one.
+  by design. The app does no hosting: slides sit on the `gh-pages` site, and
+  `publish/instagram.py:InstagramPublisher.image_urls()` derives
+  `<base>/<fingerprint>/<fingerprint>_NN.jpg` from the base URL plus the
+  fingerprint — one pure string function, no local files, no HTTP.
+- **The app holds no write credential and never calls the GitHub API.** It
+  builds public URLs and reads them, nothing else. Deploying to `gh-pages` is
+  git, and it belongs to `.github/actions/state_commit`: `git -C .pages add -A .`
+  pushes the database and whatever else sits in the checkout in one commit,
+  using the auth header `actions/checkout` already left in
+  `.pages/.git/config`. No `GITHUB_TOKEN` secret or PAT exists, and `setup`
+  exports none. Don't reintroduce one.
+- Nothing in the pipeline writes JPEGs any more: `publish/storage.py`,
+  `to_jpeg()`, `fetch_slides()` and the `upload-assets` subcommand are deleted.
+  Getting `<fp>_NN.jpg` onto `gh-pages` is outside this app, so if the site has
+  no JPEGs, `publish` gets a 404 that Meta reports as
+  `9004 / 2207052 "Only photo or video can be accepted as media type"`.
 
 ## Actions layout (hard-won constraint)
 - **Composite actions cannot read `secrets` or `vars`.** Those contexts exist
@@ -143,30 +145,21 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
 - `llm/prompts.py` builds prompts via `.format()` — any added prose must contain
   **no literal braces** or the prompt breaks at runtime.
 - Instagram uses the Instagram-Login (Business Meta app) path: carousel = 3 API
-  steps, images must be JPEG (publisher writes a JPEG sibling per PNG on the
-  fly), IG Login cannot delete containers (they self-expire in 24h).
-- `publish/storage.py` owns where the JPEGs live. `AssetStore.public_path()`
-  builds the URL as `<PUBLIC_ASSET_BASE_URL>/<path relative to output_dir>` =
-  `<fingerprint>/<fp>_NN.jpg`, never the bare file name — renders live in a
-  per-fingerprint subdirectory, so a basename-only URL 404s. Meta reports a
-  failed image download as `9004 / 2207052 "Only photo or video can be accepted
-  as media type"`, which reads like a `media_type` bug and is not one;
+  steps, the images on the site must be JPEG, IG Login cannot delete containers
+  (they self-expire in 24h).
+- `publish/instagram.py` owns every URL: `image_urls(draft)` is
+  `<PUBLIC_ASSET_BASE_URL>/<fp>/<fp>_NN.jpg` for each slide, 1-based and in
+  order. Never the bare file name — renders live in a per-fingerprint
+  subdirectory, so a basename-only URL 404s. Meta reports a failed image
+  download as `9004 / 2207052 "Only photo or video can be accepted as media
+  type"`, which reads like a `media_type` bug and is not one;
   `_create_container` retries it 3× (Meta also returns it for URLs that work
   later) and `_explain` echoes Meta's `error_user_msg` (the URI).
-- Instagram fetches the image **while creating the container**, so publishing is
-  stage → wait-for-live → then the API call
-  (`InstagramPublisher._public_image_url` → `AssetStore.publish`). The Pages
-  backend stages the file and polls the CDN until it really returns 200 —
-  publishing before Pages serves the file is the same 404-as-9004 trap. The poll
-  is an anonymous GET, exactly the request Instagram will make.
-- `publish_rendered` (the `upload-assets` subcommand) deliberately does **not**
-  wait: it `stage`s and returns `public_path`. On Actions the deploy happens
-  afterwards in the state action, so waiting there would be waiting on a push
-  that hasn't happened. Getting the URL from the staged copy instead of the
-  rendered one silently drops the fingerprint directory from the path — always
-  `public_path` the *rendered* image.
-- `PublishError` lives in `publish/errors.py` so both the Graph client and the
-  asset store raise one exception type.
+- Instagram fetches the image **while creating the container**, so the slide has
+  to be live before the API call. That is why hosting is the deployment step's
+  job and never part of a publish: nothing here stages, uploads or polls.
+- `PublishError` lives in `publish/errors.py` so the Graph client raises one
+  exception type everywhere.
 - RSS scoring: enterprise/org-change terms weigh ~1.5× generic infra terms,
   `FEED_PRIORITY[feed]` multiplies the score (default 1.0), and product-marketing
   terms (`PRODUCT_TERMS`) penalise entries so vendor promos never win.
@@ -176,8 +169,7 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   HN ranks by points, Reddit by comments.
 
 ## Gotchas
-- Only `README.md` + `.gitignore` are committed; `src/` is untracked — `git
-  diff` will not show source changes.
+- `src/` is tracked, so `git diff` shows source changes. `data/` is not.
 - The live `.env` still carried `PUBLIC_ASSET_BASE_URL=http://127.0.0.1:8788`
   from the deleted tunnel setup; `doctor` now errors on any private/http base
   (`cli._is_private_host`).
@@ -203,10 +195,9 @@ Windows dev machine, Python 3.12 venv (`.venv`), `uv` + `hatchling`.
   deploy from `gh-pages`/root, and Actions workflow permissions set to
   read+write. The commit step rebase-then-pushes, so a `concurrency: pipeline`
   group is belt-and-braces, not the thing keeping the branch consistent.
-- `publish_rendered()`/`to_jpeg()` in `publish/storage.py` back the
-  `upload-assets` subcommand (the render workflow's Pages push). A JPEG with no
-  PNG beside it is returned as-is, which is what lets `publish` work on a clean
-  runner after `fetch_slides()` pulls them back off the public URL.
+- Deploying the slides is your step: nothing in the repo converts PNG→JPEG or
+  writes to `gh-pages` any more. If publishing 9004s with a URI that plainly
+  should exist, check the file really is at `<fp>/<fp>_NN.jpg` on the site.
 - The agent cannot view rendered images; verify layout via `tests/lint_layout.py` /
   `tests/check_render.py` / `tests/check_contrast.py`, never by assumption.
 - Changing `DEFAULT_FEEDS`/scoring in `sources/rss.py` implies updating

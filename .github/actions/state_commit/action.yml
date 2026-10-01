@@ -1,8 +1,8 @@
 name: Commit state
 description: >-
-  Copy the pipeline's database into the .pages checkout, commit it together with
-  any slides a stage staged there, and push to gh-pages. Call with `if: always()`
-  so a stage that failed partway still records what it changed.
+  Copy the pipeline's database into the .pages checkout, commit it, and push to
+  gh-pages. Call with `if: always()` so a stage that failed partway still
+  records what it changed.
 
 inputs:
   message:
@@ -13,7 +13,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Commit the state and any staged assets
+    - name: Commit the state
       shell: bash
       env:
         MESSAGE: ${{ inputs.message }}
@@ -26,9 +26,15 @@ runs:
           git -C .pages remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           # A cold `git init` has none of the auth that actions/checkout writes
           # into .git/config, so copy that same header across from the workspace
-          # checkout rather than holding a credential of our own.
+          # checkout rather than holding a credential of our own. Written as an
+          # if, not `[ -n "$header" ] && ...`: a short-circuited `&&` leaves the
+          # block with a failing status, which `set -e` is entitled to act on.
           header=$(git config --get http.https://github.com/.extraheader || true)
-          [ -n "$header" ] && git -C .pages config http.https://github.com/.extraheader "$header"
+          if [ -n "$header" ]; then
+            git -C .pages config http.https://github.com/.extraheader "$header"
+          else
+            echo "no auth header in the workspace checkout; the push below will fail if one is needed"
+          fi
         fi
 
         mkdir -p .pages/state
@@ -42,9 +48,9 @@ runs:
           find .pages/state \( -name '*-wal' -o -name '*-shm' \) -size 0 -delete
         fi
 
-        # The whole checkout is committed, not just state/: the render workflow
-        # stages the JPEG siblings into it (ASSET_LOCAL_DIR points here) and
-        # they have to reach the Pages site in this same commit.
+        # The whole checkout is committed, not just state/, so anything else
+        # sitting in it (slides, a manual drop) reaches the Pages site in the
+        # same commit as the database.
         git -C .pages add -A .
         if git -C .pages diff --cached --quiet; then
           echo "state unchanged, nothing to commit"

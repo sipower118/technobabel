@@ -27,7 +27,6 @@ SUITES = [
     "test_reddit.py",
     "test_publish.py",
     "test_publish_queue.py",
-    "test_storage.py",
     "test_pages_state.py",
     "test_release.py",
     "check_actions.py",

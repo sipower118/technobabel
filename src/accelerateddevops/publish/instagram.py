@@ -6,16 +6,16 @@ carousels, and insights without that risk.
 
 Three hard constraints shape this module:
 
-1. Instagram fetches image bytes from a **public URL**. It cannot reach a
-   localhost path or a private bucket without a token, and it downloads while
-   the container is being created - so the image has to be live at its URL
-   *before* the API call. `publish/storage.py` owns that half of the job.
-2. Instagram accepts **only JPEG** for image posts, while the renderer writes
-   PNG for review. Publishing converts each slide to a JPEG sibling on the fly
-   so the image URL Instagram fetches is always a JPEG. The URL must also
-   mirror the file's location *under the served root* - the renderer writes
-   `<fingerprint>/<fingerprint>_NN.png`, so the path relative to the output
-   directory is part of the URL, not just the file name.
+1. Instagram fetches image bytes from a **public URL**, while it creates the
+   container, so the slides have to be live before the API call. They already
+   are: they sit on the gh-pages site. All this module needs is that site's
+   root, and `image_urls()` turns it plus the fingerprint into one URL per
+   slide. Nothing is staged, converted, uploaded, downloaded or waited for -
+   hosting is not publishing, and none of that belongs here.
+2. The URL has to mirror how the renderer names things:
+   `<fingerprint>/<fingerprint>_NN.jpg` under the site root. A wrong path is a
+   404, and Meta reports a 404 as 9004/2207052 "Only photo or video can be
+   accepted as media type", which reads like a `media_type` bug and is not one.
 3. Carousels are published in three steps: create N item containers, then a
    `media_type=CAROUSEL` parent container, then publish that parent with a
    single `/media_publish`. If any step fails, already-created containers are
@@ -29,15 +29,12 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from functools import cached_property
-from pathlib import Path
 
 import httpx
 
 from ..config import Settings
-from ..models import Draft, MAX_CAPTION_CHARS, MAX_CAROUSEL_ITEMS, MAX_HASHTAGS
+from ..models import Draft, MAX_CAPTION_CHARS, MAX_CAROUSEL_ITEMS
 from .errors import PublishError
-from .storage import AssetStore, build_asset_store, fetch_slides, to_jpeg
 
 log = logging.getLogger(__name__)
 
@@ -97,12 +94,6 @@ class InstagramPublisher:
         self._client = client
         self._owns_client = client is None
 
-    @cached_property
-    def assets(self) -> AssetStore:
-        """Where images are published. Built lazily so a missing asset config
-        only fails a publish, not every other use of the publisher."""
-        return build_asset_store(self.settings)
-
     @property
     def client(self) -> httpx.Client:
         if self._client is None:
@@ -116,12 +107,6 @@ class InstagramPublisher:
         if self._owns_client and self._client is not None:
             self._client.close()
             self._client = None
-        store = self.__dict__.get("assets")
-        if hasattr(store, "close"):
-            try:
-                store.close()  # type: ignore[no-untyped-call]
-            except Exception:  # noqa: BLE001 - best-effort cleanup
-                pass
 
     def __enter__(self) -> InstagramPublisher:
         return self
@@ -227,22 +212,31 @@ class InstagramPublisher:
     def _get(self, endpoint: str, params: dict | None = None) -> dict:
         return self._request("GET", endpoint, params=params)
 
-    def _to_jpeg(self, path: str | Path) -> Path:
-        """Convert a rendered PNG slide to its JPEG sibling (see storage.to_jpeg)."""
-        return to_jpeg(path)
+    def image_urls(self, draft: Draft) -> list[str]:
+        """URL of every slide of `draft`, in order, as the site serves them.
 
-    def media_url(self, path: str | Path) -> str:
-        """Public URL for a rendered image, whether or not it is published yet."""
-        return self.assets.public_path(Path(path))
-
-    def _public_image_url(self, image_path: str | Path) -> str:
-        """Make a slide fetchable by Instagram and return the URL it is at.
-
-        Order matters: Instagram downloads the image while it creates the
-        container, so the JPEG has to be staged first - converting to JPEG
-        before staging, because the backend only ever serves what it staged.
+        A pure function of the base URL and the fingerprint. The renderer writes
+        `<fingerprint>/<fingerprint>_NN.png` under the output directory and the
+        Pages branch keeps that same layout with `.jpg`, so there is nothing to
+        stage, convert, upload or wait on - the URL is already correct before
+        this method is called.
         """
-        return self.assets.publish(self._to_jpeg(image_path))
+        base = (self.settings.assets.base_url or "").rstrip("/")
+        if not base:
+            raise PublishError(
+                "PUBLIC_ASSET_BASE_URL is not set. Instagram downloads each "
+                "slide from a public URL, so set it to the root of the site "
+                "serving them, e.g. https://<owner>.github.io/<repo>."
+            )
+        if not draft.slides:
+            raise PublishError(
+                f"{draft.fingerprint} has no slides; render it before publishing"
+            )
+        stem = draft.fingerprint
+        return [
+            f"{base}/{stem}/{stem}_{n:02d}.jpg"
+            for n in range(1, len(draft.slides) + 1)
+        ]
 
     # ── account helpers ──────────────────────────────────────────────────
 
@@ -319,11 +313,10 @@ class InstagramPublisher:
                 time.sleep(MEDIA_FETCH_RETRY_DELAY_SECONDS * attempt)
         raise AssertionError("unreachable: retry loop always returns or raises")
 
-    def create_item_container(self, image_path: str | Path) -> str:
+    def create_item_container(self, image_url: str) -> str:
         """Create a single carousel item container (no caption of its own)."""
-        url = self._public_image_url(image_path)
         body = self._create_container(
-            {"image_url": url, "is_carousel_item": "true"}
+            {"image_url": image_url, "is_carousel_item": "true"}
         )
         creation_id = body.get("id")
         if not creation_id:
@@ -347,31 +340,26 @@ class InstagramPublisher:
 
     def publish_carousel(self, draft: Draft) -> PublishResult:
         """Publish a multi-image carousel. Cleans up partial state on failure."""
-        paths = [p for p in draft.image_paths if Path(p).is_file()]
-        if not paths:
-            raise PublishError(
-                f"no rendered images found for {draft.fingerprint} - run "
-                "`accelerated-devops render` first"
-            )
-        if len(paths) > MAX_CAROUSEL_ITEMS:
+        urls = self.image_urls(draft)
+        if len(urls) > MAX_CAROUSEL_ITEMS:
             log.warning(
                 "carousel has %d images, over the %d limit - publishing the first %d",
-                len(paths), MAX_CAROUSEL_ITEMS, MAX_CAROUSEL_ITEMS,
+                len(urls), MAX_CAROUSEL_ITEMS, MAX_CAROUSEL_ITEMS,
             )
-            paths = paths[:MAX_CAROUSEL_ITEMS]
-        if len(paths) == 1:
-            return self.publish_single_image(paths[0], draft)
+            urls = urls[:MAX_CAROUSEL_ITEMS]
+        if len(urls) == 1:
+            return self.publish_single_image(draft)
 
         user_id = self.resolve_user_id()
         caption = self._caption(draft)
         created: list[str] = []
 
         try:
-            for path in paths:
+            for url in urls:
                 # IG needs a moment between container creations; going faster
                 # is a reliable way to get 429s.
                 time.sleep(1.0)
-                created.append(self.create_item_container(path))
+                created.append(self.create_item_container(url))
             log.info("created %d carousel item containers", len(created))
 
             carousel_id = self.create_carousel_container(created, caption)
@@ -390,9 +378,9 @@ class InstagramPublisher:
             self._discard(created)
             raise
 
-    def publish_single_image(self, image_path: str | Path, draft: Draft) -> PublishResult:
+    def publish_single_image(self, draft: Draft) -> PublishResult:
         user_id = self.resolve_user_id()
-        url = self._public_image_url(image_path)
+        url = self.image_urls(draft)[0]
         caption = self._caption(draft)
         body = self._create_container({"image_url": url, "caption": caption})
         container = str(body.get("id", ""))
@@ -434,21 +422,14 @@ class InstagramPublisher:
             return ""
 
     def publish_draft(self, draft: Draft) -> PublishResult:
-        """Publish a draft, using a carousel when it has 2+ images.
+        """Publish a draft, using a carousel when it has 2+ slides.
 
-        Missing slides are fetched back from the asset backend first, because a
-        clean CI runner restores the database but not the rendered PNGs - only
-        the published JPEGs travel, and those are all Instagram ever sees.
+        Nothing is looked up on disk: the slides are already on the gh-pages
+        site, so the URLs are derived from the fingerprint alone.
         """
-        if not any(Path(p).is_file() for p in draft.image_paths):
-            log.info(
-                "no rendered slides for %s locally; fetching the published ones",
-                draft.fingerprint,
-            )
-            fetch_slides(self.settings, draft)
-        if len(draft.image_paths) >= 2:
+        if len(draft.slides) >= 2:
             return self.publish_carousel(draft)
-        return self.publish_single_image(draft.image_paths[0], draft)
+        return self.publish_single_image(draft)
 
     # ── insights ─────────────────────────────────────────────────────────
 

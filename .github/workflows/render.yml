@@ -1,10 +1,10 @@
 name: Render
 
-# Re-render the slides for drafts that are waiting, then push them to the
-# gh-pages branch. The push is what makes a render reviewable in a browser and
-# what lets a later publish run fetch the slides back on a clean runner: only
-# the JPEG siblings travel, laid out exactly as the render wrote them,
-# <fingerprint>/<fingerprint>_NN.jpg under the site root.
+# Re-render the slides for drafts that are waiting. The rendered PNGs stay in
+# the workspace and this workflow only commits the database back to gh-pages.
+# Getting the slides onto the Pages site is a deployment step of its own: put
+# them at <fingerprint>/<fingerprint>_NN.jpg under the site root, which is the
+# one layout `publish` builds every image URL from.
 on:
   workflow_dispatch:
     inputs:
@@ -47,11 +47,7 @@ jobs:
           ig-access-token: ${{ secrets.IG_ACCESS_TOKEN }}
           reddit-client-id: ${{ secrets.REDDIT_CLIENT_ID }}
           reddit-client-secret: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          asset-storage: ${{ vars.ASSET_STORAGE || 'pages' }}
-          asset-local-dir: ${{ vars.ASSET_LOCAL_DIR || 'site' }}
           public-asset-base-url: ${{ vars.PUBLIC_ASSET_BASE_URL }}
-          github-pages-branch: ${{ vars.GITHUB_PAGES_BRANCH || 'gh-pages' }}
-          pages-settle-seconds: ${{ vars.PAGES_SETTLE_SECONDS || '90' }}
 
       - name: Restore state
         uses: ./.github/actions/state_restore
@@ -64,26 +60,13 @@ jobs:
             uv run accelerated-devops render --status "${{ inputs.status || 'draft' }}" --limit 10
           fi
 
-      - name: Stage the slides into the Pages checkout
-        # The CLI only stages the JPEG siblings; it has no write credential.
-        # Staging straight into the .pages checkout means the "Commit state"
-        # step below publishes them in the same commit as the database.
-        env:
-          ASSET_LOCAL_DIR: ${{ github.workspace }}/.pages
-        run: |
-          if [ -n "${{ inputs.fingerprint }}" ]; then
-            uv run accelerated-devops upload-assets "${{ inputs.fingerprint }}"
-          else
-            uv run accelerated-devops upload-assets
-          fi
-
-      - name: Commit state and slides
+      - name: Commit state
         if: always()
         uses: ./.github/actions/state_commit
         with:
-          message: "render: refresh slides and publish them to the artefact branch"
+          message: "render: refresh the rendered slides"
 
-      - name: Report the public URLs
-        run: echo "review the slides at ${PUBLIC_ASSET_BASE_URL}/<fingerprint>/"
-        # Reachable a minute or so after the push: the CDN picks up a new commit
-        # on its own schedule, which is why the publish step re-checks.
+      - name: Say where the slides belong
+        run: |
+          echo "Publish <fingerprint> from ${PUBLIC_ASSET_BASE_URL}/<fingerprint>/"
+          echo "Slides must be served as <fingerprint>/<fingerprint>_NN.jpg under that root."

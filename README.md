@@ -39,7 +39,6 @@ Windows: `copy .env.example .env`. Everywhere else: `cp .env.example .env`.
 | `approve <fp>...` / `reject <fp>...` | Review triage. |
 | `schedule` | Place approved drafts into the next free publish slots. |
 | `publish [fp]` | Post the oldest approved draft, or one specific draft. `--due` posts everything whose slot has arrived. |
-| `upload-assets [fp]` | Push the rendered slides to the asset backend without posting them. |
 | `check-token` | Verify the Instagram token against the live API. |
 | `run` | One full cycle: collect, generate, schedule, publish. |
 | `daemon` | Stay resident and run a cycle at each publish slot. |
@@ -86,9 +85,7 @@ The `gh-pages` branch holds everything that has to outlive the run:
 state/accelerated_devops.sqlite3          the database
 ```
 
-Two composite actions keep the workflows short and the knowledge in one place:
-
-Two composite actions keep the workflows short and the knowledge in one place:
+Three composite actions keep the workflows short and the knowledge in one place:
 
 - `.github/actions/setup` — checks out the code, installs with `uv`, and exports
   the configuration to later steps. It takes the settings as **inputs**: a
@@ -99,7 +96,7 @@ Two composite actions keep the workflows short and the knowledge in one place:
 - `.github/actions/state_restore` — checks gh-pages out into `.pages` and
   copies the database into `data/`.
 - `.github/actions/state_commit` — copies the database back, commits the whole
-  checkout (database *and* staged slides) and pushes.
+  checkout (database *and* anything else in it) and pushes.
 
 Both are unconditional: one does one thing. Neither takes a credential, and
 neither takes an input that chooses what it does — the push reuses the auth
@@ -114,11 +111,10 @@ the meantime. An empty `-wal` is checkpointed away by `Store.close()` and is not
 committed as zero-byte noise; a non-empty one is real unmerged state and does
 travel.
 
-Only the JPEG siblings are kept, not the PNGs — a carousel is ~200 KB of PNG per
-post and only the JPEG ever reaches Instagram. `publish` on a clean runner
-therefore **fetches the slides back from the public URL** rather than
-re-rendering them, so the bytes Meta downloads are byte-for-byte the ones that
-were reviewed on the Pages site.
+The slides belong on the branch as `<fingerprint>/<fingerprint>_NN.jpg`, and
+that is the only thing a publish run needs: it derives one URL per slide from
+the fingerprint, so it works on a clean runner with no local images at all and
+downloads whatever the Pages site serves.
 
 Note that `state/` is inside the published site, so the database is publicly
 downloadable. It holds draft text, source URLs and media ids — no credentials —
@@ -130,15 +126,14 @@ Secrets → Settings → Secrets: `GEMINI_API_KEYS`, `IG_USER_ID`,
 `IG_ACCESS_TOKEN`, and optionally `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`.
 
 That is the whole list. The pipeline code holds no write credential and never
-calls the GitHub API — it stages images and reads public URLs. Publishing to
+calls the GitHub API — it builds public URLs and reads them. Publishing to
 the Pages branch is git, done by the workflow using the credentials
 `actions/checkout` already provides.
 
 Variables → Settings → Secrets and variables → Actions → Variables:
 `PUBLIC_ASSET_BASE_URL` (the deployed Pages URL, e.g.
-`https://<owner>.github.io/<repo>`). `ASSET_STORAGE`, `ASSET_LOCAL_DIR`,
-`GITHUB_PAGES_BRANCH` and `PAGES_SETTLE_SECONDS` all have sensible defaults in
-the setup action and only need setting if you want something unusual.
+`https://<owner>.github.io/<repo>`) — the only one, and the root every slide URL
+is built from.
 
 Two one-time repo settings the workflows depend on:
 
@@ -210,8 +205,8 @@ accelerated-devops check-token
 That calls `graph.instagram.com/me` with the token from `.env` and prints the
 account it belongs to.
 
-Publishing details worth knowing: images must be **JPEG** (the renderer writes
-PNG; the publisher converts to a JPEG sibling on the fly), Instagram fetches
+Publishing details worth knowing: images must be **JPEG** on the site (the
+renderer writes PNG, so the deployed files are JPEG siblings), Instagram fetches
 them from the public URL in `PUBLIC_ASSET_BASE_URL`, and a carousel is three
 steps (item containers → a `CAROUSEL` parent → `/media_publish`). If an item
 creation fails, the publisher cleans up the containers it created best-effort;
@@ -222,49 +217,35 @@ Captions over 2200 characters are rejected before any API call is spent.
 
 Instagram downloads each image from a **public URL itself**, while it creates the
 container, and it cannot reach `localhost`. So the rendered slides must live
-somewhere public. `ASSET_STORAGE` picks the backend:
+somewhere public — GitHub Pages is what this repo is set up for.
 
-| `ASSET_STORAGE` | What it does | Hosting |
-| --- | --- | --- |
-| `local` (default) | Copies each JPEG into `ASSET_LOCAL_DIR` | You host that folder: nginx, S3, R2, a CDN |
-| `pages` | The same copy, then checks the site actually serves each URL before it is handed to Instagram | GitHub Pages serves it |
+Publishing does no hosting. Given `PUBLIC_ASSET_BASE_URL` and a fingerprint it
+derives one URL per slide and hands those to Instagram:
 
-Both stages into a folder and leave the deploying alone — that is deliberate.
-The app has no write credential and never talks to the GitHub API, so pushing
-is the workflow's job. On Actions the render workflow points
-`ASSET_LOCAL_DIR` at the `gh-pages` checkout it already has and commits the
-staged slides in the same commit as the pipeline's database, which needs no
-credential beyond the one `actions/checkout` leaves behind.
-
-There is no built-in web server and no tunnel to keep alive — the point of
-`pages` is that it works on a throwaway GitHub Actions runner.
-
-#### GitHub Pages (recommended for GitHub Actions)
-
-```ini
-ASSET_STORAGE=pages
-ASSET_LOCAL_DIR=site
-PUBLIC_ASSET_BASE_URL=https://<owner>.github.io/<repo>
-GITHUB_PAGES_BRANCH=gh-pages
+```text
+<PUBLIC_ASSET_BASE_URL>/<fingerprint>/<fingerprint>_NN.jpg
 ```
 
-One-time setup: repo **Settings → Pages → Deploy from a branch** → `gh-pages` /
-`/ (root)`. The branch itself is created automatically on the first publish.
+That is exactly the layout the renderer writes under `data/output/`, so getting
+the slides onto the site is one deployment step outside the app: convert each
+`<fp>_NN.png` to `<fp>_NN.jpg` and commit it to `gh-pages` under its own
+fingerprint directory. The app holds no write credential and never talks to the
+GitHub API, so that push is yours (or a workflow's) to make.
 
-The workflow needs write access to commit the slides and the database:
+One-time setup: repo **Settings → Pages → Deploy from a branch** → `gh-pages` /
+`/ (root)`. The branch itself is created automatically by the first state commit.
+
+```ini
+PUBLIC_ASSET_BASE_URL=https://<owner>.github.io/<repo>
+```
+
+The workflow needs write access to commit the database:
 
 ```yaml
 permissions:
   contents: write
 ```
 
-`PAGES_SETTLE_SECONDS` (default 90) bounds how long a publish waits for the
-Pages CDN to actually serve a just-pushed file — Instagram fetches the URL the
-moment the container is created, so publishing too early would 404.
-
-The URL sent to Instagram is the file's path **relative to `ASSET_LOCAL_DIR`**,
-not just its file name: the renderer writes `<fingerprint>/<fp>_01.png`, so the
-published URL is `https://<owner>.github.io/<repo>/<fingerprint>/<fp>_01.jpg`.
 Dropping the fingerprint directory yields a 404, and Instagram reports a failed
 image download as `9004 (subcode 2207052) "Only photo or video can be accepted
 as media type"` — an error about `media_type` that is really about the URL. That
@@ -422,9 +403,8 @@ src/accelerateddevops/
   sources/        rss.py, hackernews.py, reddit.py
   llm/            gemini.py (the ladder), prompts.py
   render/         theme.py, fonts.py, carousel.py
-  publish/        instagram.py, storage.py, errors.py
+  publish/        instagram.py, errors.py
 tests/            standalone assert-suites + run_all.py
-site/             staged JPEGs (ASSET_LOCAL_DIR)  (gitignored)
 data/             sqlite db, rendered pngs  (gitignored)
 .pages/           CI checkout of the gh-pages artefact branch  (gitignored)
 ```
@@ -512,9 +492,10 @@ Used to see the pipeline's behaviour over time; not queried by any command.
 ### What is NOT in the database
 
 The slides themselves. Rendered images are PNG files under
-`data/output/<fingerprint>/`; the database only stores their paths, and the
-publisher generates JPEG siblings on the fly for Instagram. No draft JSON files
-are written to disk — the old "data/drafts" directory is unused.
+`data/output/<fingerprint>/`; the database only stores their paths, and a
+publish run never reads them — it derives the public URL for each slide from the
+fingerprint. No draft JSON files are written to disk — the old "data/drafts"
+directory is unused.
 
 ### How it is used
 

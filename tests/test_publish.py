@@ -1,19 +1,16 @@
 """Instagram publisher tests against a mock Graph API (Instagram Login).
 
 Verifies the carousel three-phase flow (item containers -> CAROUSEL parent ->
-media_publish), the PNG->JPEG conversion, asset hosting (local folder staging
-and the GitHub Pages backend), best-effort cleanup, the public-URL guard,
-caption limits, and error message translation.
+media_publish), the URL layout that mirrors the render output on gh-pages,
+best-effort cleanup, the missing-base-URL guard, caption limits, and error
+message translation. No image file is ever touched: the slides are already
+hosted, so publishing only ever hands Meta a URL.
 """
 
-import json
 import re
-import shutil
-import sys
 from pathlib import Path
 
 import httpx
-from PIL import Image
 
 
 import _paths  # noqa: F401  (sys.path + chdir bootstrap)
@@ -21,36 +18,15 @@ from accelerateddevops.config import AssetConfig, InstagramConfig, Settings
 from accelerateddevops.models import Draft, Slide, SourceItem
 from accelerateddevops.publish import InstagramPublisher, PublishError
 
-# Mirror the real render layout: data/output/<fingerprint>/<fingerprint>_NN.png,
-# served by serve-assets from data/output. Getting this layout wrong in the URL
-# is exactly the 9004/2207052 bug, so the fixtures must reproduce it.
 DATA_DIR = Path("data/_pubtest")
-DATA = DATA_DIR / "output"
-FINGERPRINT = "abc123def456"
-SLIDES = DATA / FINGERPRINT
-shutil.rmtree(DATA_DIR, ignore_errors=True)
-SLIDES.mkdir(parents=True)
+BASE = "https://cdn.example.com/out"
 
 
-def png_file(name: str, color=(120, 90, 200)) -> Path:
-    path = SLIDES / name
-    Image.new("RGB", (8, 8), color).save(path, "PNG")
-    return path
-
-
-for i in range(1, 15):
-    png_file(f"a_{i:02d}.png", color=(120 + i, 90, 200))
-
-
-def make_settings(base="https://cdn.example.com/out"):
+def make_settings(base=BASE):
     return Settings(
         data_dir=DATA_DIR,
         instagram=InstagramConfig(user_id="1789", access_token="tok", page_id=None),
-        assets=AssetConfig(
-            storage="local",
-            base_url=base,
-            local_dir=DATA_DIR / "site",
-        ),
+        assets=AssetConfig(base_url=base),
     )
 
 
@@ -104,7 +80,7 @@ def handler(requests, fail_on=None, permalink=True):
         # permalink lookup: GET /{media-id}
         if permalink and request.method == "GET" and path.split("/")[-1].isdigit():
             return httpx.Response(200, json={"id": path.split("/")[-1],
-                                            "permalink": "https://www.instagram.com/p/ABC/"})
+                                             "permalink": "https://www.instagram.com/p/ABC/"})
 
         return httpx.Response(200, json={})
 
@@ -116,16 +92,17 @@ def make_draft(n_images=3, caption="A caption"):
     return Draft(
         source=item, caption=caption,
         slides=[Slide(i + 1, "cover" if i == 0 else "bullets", f"H{i}") for i in range(n_images)],
-        image_paths=[str(SLIDES / f"a_{i:02d}.png") for i in range(1, n_images + 1)],
     )
 
 
 # ── 1. happy path: N items + 1 CAROUSEL parent + 1 publish ────────────────
 calls = []
 s = make_settings()
+draft = make_draft(3)
+fp = draft.fingerprint
 client = httpx.Client(transport=handler(calls))
 with InstagramPublisher(s, client=client) as pub:
-    res = pub.publish_draft(make_draft(3))
+    res = pub.publish_draft(draft)
 
 items = [c for c in calls if c[0] == "POST" and c[1].endswith("/media") and "image_url" in c[2]]
 parents = [c for c in calls if c[0] == "POST" and c[1].endswith("/media") and c[2].get("media_type") == "CAROUSEL"]
@@ -146,54 +123,47 @@ for _m, _p, form in items:
 assert parents[0][2].get("caption") == "A caption", "the CAROUSEL parent carries the caption"
 ok("caption: only the carousel parent carries the caption, not the items")
 
-# ── 3. PNG slides are converted to JPEG before the URL is sent ────────────
+# ── 3. the URL mirrors the render layout under the site root ──────────────
+# Regression: dropping the fingerprint directory (or naming the file by itself)
+# is a 404, and Meta reports a 404 as 9004/2207052 "Only photo or video can be
+# accepted as media type". The renderer writes
+# <fingerprint>/<fingerprint>_NN.png under output_dir, and gh-pages keeps that
+# same layout with .jpg - so that is exactly what has to be handed to Instagram.
 urls = [c[2]["image_url"] for c in items]
+expected = [f"{BASE}/{fp}/{fp}_{n:02d}.jpg" for n in range(1, 4)]
+assert urls == expected, f"got {urls}, want {expected}"
 assert all(u.endswith(".jpg") for u in urls), f"image URLs must be .jpg, got {urls}"
-assert all(u.startswith("https://cdn.example.com/out/") for u in urls)
-jpg_files = sorted(SLIDES.glob("a_*.jpg"))
-assert len(jpg_files) == 3, f"expected 3 converted jpg siblings (for the 3 published items), got {len(jpg_files)}"
-ok("jpeg: slides converted to .jpg siblings served from the same base URL")
+ok(f"url: <base>/{fp}/{fp}_NN.jpg mirrors the render output, fingerprint directory and all")
 
-# ── 4. media_url keeps the path under the served root ─────────────────────
-# Regression: media_url used the bare file name, dropping the fingerprint
-# directory the asset server actually serves from. Instagram then got a 404
-# and reported it as 9004/2207052 "Only photo or video can be accepted as
-# media type". The URL must mirror the on-disk path relative to output_dir.
-expected = f"https://cdn.example.com/out/{FINGERPRINT}/a_01.jpg"
-# The real call site is media_url(_to_jpeg(path)); step 3 already wrote the
-# jpg siblings, so exercise the same thing.
+# ── 4. image_urls: same layout from any base, no local file involved ──────
 with InstagramPublisher(make_settings()) as pub:
-    jpg = pub._to_jpeg(SLIDES / "a_01.png")
-    assert jpg.name == "a_01.jpg"
-    assert pub.media_url(jpg) == expected, pub.media_url(jpg)
-for url in urls:
-    assert url == f"https://cdn.example.com/out/{FINGERPRINT}/{Path(url).name}", url
-    assert (DATA / url.removeprefix("https://cdn.example.com/out/")).is_file(), (
-        f"every published URL must resolve to a real file under the served root: {url}"
-    )
-ok(f"media_url: mirrors the served path ({FINGERPRINT}/a_01.jpg), not just the filename")
+    got = pub.image_urls(make_draft(2))
+assert got == [f"{BASE}/{fp}/{fp}_01.jpg", f"{BASE}/{fp}/{fp}_02.jpg"], got
+ok("image_urls: one URL per slide, in order, without touching the filesystem")
 
 # A trailing slash on the base must not produce a double slash.
-with InstagramPublisher(make_settings("https://cdn.example.com/out/")) as pub:
-    assert pub.media_url(SLIDES / "a_01.jpg") == expected
-ok("media_url: base with a trailing slash still yields one separator")
-
-# A file outside the served root still gets a URL, but warns loudly instead of
-# silently 404-ing.
-with InstagramPublisher(make_settings()) as pub:
-    outside = DATA_DIR / "elsewhere.png"
-    Image.new("RGB", (8, 8), (10, 10, 10)).save(outside, "PNG")
-    assert pub.media_url(outside) == "https://cdn.example.com/out/elsewhere.png"  # path outside source root, so just name
-ok("media_url: a file outside the served root falls back to the bare name")
+with InstagramPublisher(make_settings(BASE + "/")) as pub:
+    assert pub.image_urls(make_draft(1)) == [f"{BASE}/{fp}/{fp}_01.jpg"]
+ok("image_urls: base with a trailing slash still yields one separator")
 
 # ── 5. missing PUBLIC_ASSET_BASE_URL fails loudly ─────────────────────────
 with InstagramPublisher(make_settings(base="")) as pub:
     try:
-        pub.media_url(png_file("x.png"))
+        pub.image_urls(make_draft(1))
         raise SystemExit("FAIL: expected PublishError")
     except PublishError as e:
         assert "PUBLIC_ASSET_BASE_URL" in str(e)
-ok("guard: refuses to build a localhost URL Instagram could not fetch")
+ok("guard: refuses to build a URL without a base Instagram could fetch from")
+
+# A draft that was never rendered has nothing to link to, and must say so
+# rather than handing Instagram a URL that 404s.
+with InstagramPublisher(make_settings()) as pub:
+    try:
+        pub.publish_draft(make_draft(0))
+        raise SystemExit("FAIL: expected PublishError")
+    except PublishError as e:
+        assert "no slides" in str(e), e
+ok("guard: a draft with no slides is refused before any API call")
 
 # ── 6. caption over 2200 chars is rejected before any API call ───────────
 calls = []
@@ -281,7 +251,7 @@ ok("check_token: /me returns the IG user id and username")
 with InstagramPublisher(
     Settings(
         instagram=InstagramConfig("1789", "", None),
-        assets=AssetConfig(storage="local", base_url="https://cdn.example.com/out", local_dir=Path("site")),
+        assets=AssetConfig(base_url=BASE),
     ),
 ) as pub:
     try:
@@ -373,5 +343,4 @@ with InstagramPublisher(
 assert token_calls == 1, f"a 190 must fail immediately, got {token_calls} attempts"
 ok("retry: unrelated errors still fail on the first attempt")
 
-shutil.rmtree(DATA_DIR, ignore_errors=True)
 print("\nPUBLISHER TESTS PASSED")

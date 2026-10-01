@@ -52,33 +52,18 @@ class InstagramConfig:
 
 @dataclass(frozen=True)
 class AssetConfig:
-    """Where rendered slides are published for Instagram to fetch.
+    """Where the rendered slides are served from.
 
-    Instagram downloads the image from a public URL itself, so hosting is part
-    of publishing, not an afterthought. `storage` picks the backend:
-
-    - ``local``  stage JPEGs in `local_dir` and host that folder yourself
-    - ``pages``  stage them the same way, but check that the GitHub Pages site
-                 really serves the URL before it is handed to Instagram
-
-    Staging is all this app does either way. Committing the staged folder to the
-    Pages branch is the deployment step's job, not the app's - the app has no
-    write credentials and never talks to the GitHub API.
+    Instagram downloads every slide from a public URL itself, so the app needs
+    one thing: the root of the site that already has them - the gh-pages site,
+    e.g. https://user.github.io/repo. The rest of the layout is fixed: a slide
+    lives at `<base>/<fingerprint>/<fingerprint>_NN.jpg`, mirroring where the
+    renderer wrote it. Staging, backends and deploys are not configuration
+    here, because none of them are this app's job.
     """
 
-    storage: str = "local"
     # Public root every image URL is built from, e.g. https://user.github.io/repo
     base_url: str = ""
-    local_dir: Path = Path("site")
-    # Which branch the Pages site is served from. Informational here: the app
-    # never pushes to it, the workflow's own checkout does.
-    github_branch: str = "gh-pages"
-    # How long to wait for the Pages CDN to serve a file that was just deployed.
-    pages_settle_seconds: int = 90
-
-    @property
-    def is_pages(self) -> bool:
-        return self.storage == "pages"
 
 
 @dataclass(frozen=True)
@@ -142,16 +127,11 @@ class Settings:
 
     @property
     def can_publish(self) -> bool:
-        """True when a publish could get as far as fetching an image."""
+        """True when a publish could build a URL for every slide."""
         return self.instagram.is_configured and bool(self.assets.base_url)
 
     def ensure_dirs(self) -> None:
-        for path in (
-            self.data_dir,
-            self.drafts_dir,
-            self.output_dir,
-            self.assets.local_dir,
-        ):
+        for path in (self.data_dir, self.drafts_dir, self.output_dir):
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -166,11 +146,7 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env") -> Settings:
     )
 
     assets = AssetConfig(
-        storage=os.getenv("ASSET_STORAGE", "local").strip().lower(),
         base_url=os.getenv("PUBLIC_ASSET_BASE_URL", "").strip().rstrip("/"),
-        local_dir=Path(os.getenv("ASSET_LOCAL_DIR", "site")).expanduser(),
-        github_branch=os.getenv("GITHUB_PAGES_BRANCH", "gh-pages").strip() or "gh-pages",
-        pages_settle_seconds=_int(os.getenv("PAGES_SETTLE_SECONDS"), 90),
     )
 
     return Settings(

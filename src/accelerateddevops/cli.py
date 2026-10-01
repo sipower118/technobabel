@@ -2,8 +2,8 @@
 
 Commands mirror the pipeline stages so you can inspect and intervene at any
 point: `collect`, `generate`, `render`, `list`, `approve`, `schedule`,
-`publish`, `upload-assets`, `run`, `daemon`, `doctor`. Each stage also has its
-own GitHub Actions workflow, so they can be triggered independently.
+`publish`, `run`, `daemon`, `doctor`. Each stage also has its own GitHub
+Actions workflow, so they can be triggered independently.
 """
 
 from __future__ import annotations
@@ -263,26 +263,6 @@ def cmd_publish(args: argparse.Namespace, settings: Settings) -> int:
             return _publish_and_record(store, publisher, draft, settings)
 
 
-def cmd_upload_assets(args: argparse.Namespace, settings: Settings) -> int:
-    """Publish the rendered slides to the asset backend without posting them.
-
-    The render workflow calls this so a render can be reviewed on the Pages
-    site before anything reaches Instagram, and so a later publish run can
-    fetch the slides back on a clean runner.
-    """
-    from .publish.storage import publish_rendered
-
-    try:
-        urls = publish_rendered(settings, args.fingerprint)
-    except PublishError as exc:
-        err(str(exc))
-        return 1
-    for url in urls:
-        info(url)
-    ok(f"published {len(urls)} slide(s) to the asset backend")
-    return 0
-
-
 def cmd_check_token(args: argparse.Namespace, settings: Settings) -> int:
     """Validate IG_USER_ID / IG_ACCESS_TOKEN against the live Graph API."""
     ig = settings.instagram
@@ -428,18 +408,8 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
         warn("IG_USER_ID / IG_ACCESS_TOKEN missing - cannot publish")
         problems += 1
     assets = settings.assets
-    if assets.storage == "local":
-        ok(f"asset storage: local folder ({assets.local_dir}) - you host this yourself")
-    elif assets.storage == "pages":
-        ok(f"asset storage: GitHub Pages (branch {assets.github_branch})")
-        info("staging only: the workflow must deploy the assets to that branch; "
-             "the app never talks to the GitHub API")
-    else:
-        err(f"unknown ASSET_STORAGE={assets.storage!r} - use 'local' or 'pages'")
-        problems += 1
-
     if assets.base_url:
-        ok(f"asset base: {assets.base_url}")
+        ok(f"slides are served from: {assets.base_url}")
         if _is_private_host(assets.base_url):
             err("PUBLIC_ASSET_BASE_URL points at a private address - Instagram "
                 "downloads the image from the public internet and cannot reach it")
@@ -447,7 +417,7 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
             problems += 1
     else:
         warn("PUBLIC_ASSET_BASE_URL missing - Instagram cannot fetch the images")
-        info("set it to the public root that serves ASSET_LOCAL_DIR, e.g. "
+        info("set it to the root of the Pages site, e.g. "
              "https://<owner>.github.io/<repo>")
         problems += 1
 
@@ -575,13 +545,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--due", action="store_true",
                    help="publish everything whose scheduled slot has arrived")
     p.set_defaults(func=cmd_publish)
-
-    p = sub.add_parser(
-        "upload-assets",
-        help="push rendered slides to the asset backend without posting them",
-    )
-    p.add_argument("fingerprint", nargs="?", help="only this draft (default: all renders)")
-    p.set_defaults(func=cmd_upload_assets)
 
     p = sub.add_parser("check-token", help="verify the Instagram token against the live API")
     p.set_defaults(func=cmd_check_token)

@@ -39,11 +39,7 @@ jobs:
           ig-access-token: ${{ secrets.IG_ACCESS_TOKEN }}
           reddit-client-id: ${{ secrets.REDDIT_CLIENT_ID }}
           reddit-client-secret: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          asset-storage: ${{ vars.ASSET_STORAGE || 'pages' }}
-          asset-local-dir: ${{ vars.ASSET_LOCAL_DIR || 'site' }}
           public-asset-base-url: ${{ vars.PUBLIC_ASSET_BASE_URL }}
-          github-pages-branch: ${{ vars.GITHUB_PAGES_BRANCH || 'gh-pages' }}
-          pages-settle-seconds: ${{ vars.PAGES_SETTLE_SECONDS || '90' }}
 
       - name: Restore state
         uses: ./.github/actions/state_restore

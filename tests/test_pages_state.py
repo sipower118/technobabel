@@ -25,6 +25,11 @@ BASH = r"C:\Program Files\Git\bin\bash.exe"
 ACTIONS = REPO / ".github" / "actions"
 RESTORE = ACTIONS / "state_restore" / "action.yml"
 COMMIT = ACTIONS / "state_commit" / "action.yml"
+# A composite action's `shell: bash` step runs as
+# `bash --noprofile --norc -e -o pipefail <file>` on GitHub. The extracted
+# blocks have to run under the same flags, or this suite would pass on shell
+# that the runner aborts partway through.
+RUNNER_BASH = ("--noprofile", "--norc", "-e", "-o", "pipefail")
 
 
 def ok(msg: str) -> None:
@@ -112,7 +117,7 @@ def probe_for(action: Path, title: str, env: dict, cwd: Path) -> tuple[int, str]
     """
     script = cwd / "_probe.sh"
     script.write_text(shell_block(action, title), encoding="utf-8", newline="\n")
-    result = run(BASH, str(script), cwd=cwd, env=env, check=False)
+    result = run(BASH, *RUNNER_BASH, str(script), cwd=cwd, env=env, check=False)
     return result.returncode, result.stdout + result.stderr
 
 
@@ -122,7 +127,7 @@ def main() -> int:
         return 0
 
     restore = shell_block(RESTORE, "Restore the state")
-    commit = shell_block(COMMIT, "Commit the state and any staged assets")
+    commit = shell_block(COMMIT, "Commit the state")
 
     root = Path(tempfile.mkdtemp(prefix="state-action-"))
     try:
@@ -135,12 +140,12 @@ def main() -> int:
         def restore_state() -> str:
             script = root / "_restore.sh"
             script.write_text(restore, encoding="utf-8", newline="\n")
-            return run(BASH, str(script), cwd=root, env=env).stdout
+            return run(BASH, *RUNNER_BASH, str(script), cwd=root, env=env).stdout
 
         def commit_state() -> str:
             script = root / "_commit.sh"
             script.write_text(commit, encoding="utf-8", newline="\n")
-            return run(BASH, str(script), cwd=root, env=env).stdout
+            return run(BASH, *RUNNER_BASH, str(script), cwd=root, env=env).stdout
 
         # ── 0. the probe distinguishes "absent" from "could not ask" ─────
         # This is the step that decides whether the checkout runs at all. If it
@@ -193,8 +198,9 @@ def main() -> int:
         # ── 2. the database round-trips onto the branch ───────────────────
         (data / "accelerated_devops.sqlite3").write_bytes(b"stage-1 payload")
 
-        # Staged JPEGs, exactly as `upload-assets` leaves them when
-        # ASSET_LOCAL_DIR points at this checkout.
+        # Slides dropped into the checkout, as they would be when something
+        # outside the app deploys them there: the commit step has to push the
+        # whole checkout, not only state/.
         slides = checkout / "abc123def456"
         slides.mkdir(parents=True, exist_ok=True)
         (slides / "abc123def456_01.jpg").write_bytes(b"\xff\xd8jpeg-one")
@@ -210,9 +216,8 @@ def main() -> int:
         assert not (clone / "state" / "accelerated_devops.sqlite3-wal").exists(), (
             "an empty -wal is checkpointed noise, not state worth committing"
         )
-        # The slides go out in the same commit: the pipeline code stages them
-        # into this checkout and deploying is a git concern, so they must not be
-        # left behind on the branch.
+        # The slides go out in the same commit: deploying is a git concern, so
+        # anything sitting in the checkout must not be left behind on the branch.
         for index in (1, 2):
             name = f"abc123def456_{index:02d}.jpg"
             assert (clone / "abc123def456" / name).read_bytes() == (
@@ -221,7 +226,7 @@ def main() -> int:
         assert (clone / "index.html").is_file(), (
             "the branch's existing files must survive; only added files change"
         )
-        print("OK   commit: the database and the staged slides both land")
+        print("OK   commit: the database and the rest of the checkout both land")
 
         # ── 3. a live -wal is real state and has to travel ────────────────
         (data / "accelerated_devops.sqlite3-wal").write_bytes(b"unmerged tail")
@@ -297,7 +302,7 @@ def main() -> int:
 
         script = fresh / "_commit.sh"
         script.write_text(commit, encoding="utf-8", newline="\n")
-        out = run(BASH, str(script), cwd=fresh, env=env).stdout
+        out = run(BASH, *RUNNER_BASH, str(script), cwd=fresh, env=env).stdout
         assert "state pushed to gh-pages" in out, out
 
         clone = fresh / "verify"
@@ -324,7 +329,7 @@ def main() -> int:
             env2["GITHUB_REPOSITORY"] = "example"
             script2 = slides_root / "_commit.sh"
             script2.write_text(commit, encoding="utf-8", newline="\n")
-            out = run(BASH, str(script2), cwd=slides_root, env=env2).stdout
+            out = run(BASH, *RUNNER_BASH, str(script2), cwd=slides_root, env=env2).stdout
             assert "state pushed to gh-pages" in out, out
 
             clone2 = slides_root / "verify"

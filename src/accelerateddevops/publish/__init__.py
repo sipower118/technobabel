@@ -1,4 +1,9 @@
-"""Publishing: Instagram Graph API + image hosting for the slides it fetches."""
+"""Publishing: the Instagram Graph API, and nothing else.
+
+Where the slides are hosted is deliberately not part of this package. They sit
+on the gh-pages site already, and publishing only needs to turn
+`PUBLIC_ASSET_BASE_URL` plus a fingerprint into the URLs Instagram downloads.
+"""
 
 from __future__ import annotations
 
@@ -8,20 +13,10 @@ from .instagram import (
     InstagramPublisher,
     PublishResult,
 )
-from .storage import (
-    AssetStore,
-    LocalAssetStore,
-    PagesAssetStore,
-    build_asset_store,
-)
 
 __all__ = [
     "SCOPES",
-    "AssetStore",
     "InstagramPublisher",
-    "LocalAssetStore",
-    "PagesAssetStore",
     "PublishError",
     "PublishResult",
-    "build_asset_store",
 ]
