@@ -8,14 +8,40 @@ description: >-
 runs:
   using: composite
   steps:
+    - name: Look for the artefact branch
+      id: branch
+      shell: bash
+      # `origin` and its credentials come from the workflow's own checkout,
+      # which every workflow runs first. Probing before checking out matters
+      # because this repository has no gh-pages branch until the first
+      # successful commit - fetching a ref that does not exist is a hard
+      # failure, not an empty checkout, and `continue-on-error` only papers
+      # over it by showing a red step.
+      #
+      # --exit-code makes "absent" distinguishable from "could not find out":
+      # exit 0 is found, exit 2 is no such ref, anything else is a probe we
+      # could not trust. Treating an auth or network failure as "absent" would
+      # start the stage cold on top of state we already have, and the commit
+      # afterwards would quietly replace it.
+      run: |
+        status=0
+        git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1 || status=$?
+        if [ "$status" -eq 0 ]; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        elif [ "$status" -eq 2 ]; then
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          echo "no gh-pages branch yet, starting cold"
+        else
+          echo "could not tell whether gh-pages exists (git ls-remote exit $status)"
+          exit 1
+        fi
+
     - name: Check out the artefact branch
+      if: steps.branch.outputs.present == 'true'
       uses: actions/checkout@v4
       with:
         ref: gh-pages
         path: .pages
-        # A repository that has never run has no gh-pages branch yet. There is
-        # nothing to restore then, and the commit action stands the branch up.
-        continue-on-error: true
 
     - name: Restore the state
       shell: bash
@@ -24,5 +50,11 @@ runs:
         mkdir -p data
         # The -wal and -shm sidecars come along: a database copied without a
         # live -wal silently loses the last few transactions.
-        cp -f .pages/state/*.sqlite3* data/ 2>/dev/null \
-          || echo "no state on gh-pages yet, starting cold"
+        state=(.pages/state/*.sqlite3*)
+        if [ ${#state[@]} -gt 0 ]; then
+          cp -f "${state[@]}" data/
+          echo "restored ${#state[@]} state file(s) from gh-pages"
+        else
+          # A cold start: no gh-pages branch yet, so no checkout either.
+          echo "no state on gh-pages yet, starting cold"
+        fi
