@@ -85,7 +85,7 @@ def font_path(role: str) -> str:
     """Absolute path to the best available font for a role."""
     index = _index()
     for name in FONT_CANDIDATES.get(role, FONT_CANDIDATES["body"]):
-        hit = index.get(Path(name).name.lower()) or index.get(Path(name).lower())
+        hit = index.get(Path(name).name.lower()) or index.get(str(Path(name)).lower())
         if hit and Path(hit).is_file():
             return str(hit)
 
