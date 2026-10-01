@@ -176,7 +176,7 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env") -> Settings:
     return Settings(
         gemini_api_keys=_split(os.getenv("GEMINI_API_KEYS")),
         gemini_models=_split(os.getenv("GEMINI_MODELS"))
-        or ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+        or ["gemini-3.8-flash","gemini-3.7-flash","gemini-3.6-flash","gemini-3.5-flash-lite"],
         instagram=instagram,
         assets=assets,
         brand_name=os.getenv("BRAND_NAME", "Accelerated DevOps").strip(),
