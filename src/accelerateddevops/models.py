@@ -22,6 +22,20 @@ def iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
+# U+2012 figure dash, U+2013 en dash, U+2014 em dash, U+2015 horizontal bar.
+_LONG_DASHES = str.maketrans("\u2012\u2013\u2014\u2015", "----")
+
+
+def plain_dashes(text: str) -> str:
+    """Replace typographic dashes with an ASCII hyphen.
+
+    Hard rule: a post never contains a long dash character. They read as a
+    typo in a caption and sit badly in a slide's type, so every string that
+    can reach a post is passed through here rather than being fixed by hand.
+    """
+    return text.translate(_LONG_DASHES)
+
+
 @dataclass
 class SourceItem:
     """A single piece of source material pulled from a feed or API."""
@@ -86,13 +100,18 @@ class Slide:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Slide:
+        """Rebuild a stored slide; applies the no-long-dash rule on the way in.
+
+        Drafts written before the rule existed still carry em dashes, and they
+        are exactly the ones a re-render will put back on a slide.
+        """
         return cls(
             order=int(data.get("order", 0)),
             layout=str(data.get("layout", "bullets")),
-            headline=str(data.get("headline", "")),
-            body=str(data.get("body", "")),
-            footer=str(data.get("footer", "")),
-            cta=str(data.get("cta", "")),
+            headline=plain_dashes(str(data.get("headline", ""))),
+            body=plain_dashes(str(data.get("body", ""))),
+            footer=plain_dashes(str(data.get("footer", ""))),
+            cta=plain_dashes(str(data.get("cta", ""))),
         )
 
 
@@ -121,12 +140,14 @@ class Draft:
 
         Hashtags count toward Instagram's 2200-char limit, so the 30-tag cap
         has to live here - otherwise the length validated before rendering
-        would not match the text that gets published.
+        would not match the text that gets published. The dash rule is applied
+        to the assembled string, so it covers a caption no matter which stage
+        appended to it.
         """
         tags = " ".join(
             f"#{tag.lstrip('#')}" for tag in self.hashtags[:MAX_HASHTAGS]
         )
-        return f"{self.caption.strip()}\n\n{tags}".strip()
+        return plain_dashes(f"{self.caption.strip()}\n\n{tags}".strip())
 
     @property
     def fingerprint(self) -> str:

@@ -87,14 +87,19 @@ Only if the source actually contains a number. Body explains why it matters.
 Attribution must be generic ("the pattern most platform teams land on"), \
 never a fabricated person.
 - "takeaway"  - the single thing to remember, stated with conviction.
-- "cta"       - final slide. A question to the audience, or the call to action.
+- "cta"       - final slide. A question to the audience, or the one action this \
+story calls for. It always carries a cta line.
 
 Return:
 - hook: the cover headline. Max 60 characters. No trailing period.
 - subhook: one supporting line for the cover. Max 90 characters.
 - slides: the carousel, in order, each with order (1-based), layout, headline \
 (max 70 chars), body (empty for cover, otherwise max 220 chars), footer \
-(optional, max 40 chars, for a small label like "STEP 2" or "TRADE-OFF").
+(optional, max 40 chars, for a small label like "STEP 2" or "TRADE-OFF"), cta \
+(the pill line on the final slide, max 38 chars, required on a "cta" slide and \
+empty on every other layout). The cta has to come out of this story: the one \
+thing a reader should do with it, or the question it leaves open, phrased the \
+way this content phrases it. Never a generic save / share / follow line.
 - caption: the Instagram caption. 120-400 characters. Open with a line that \
 stands alone in the feed, then 2-4 short lines of substance, then a question. \
 Do NOT put hashtags in the caption - they are added separately.

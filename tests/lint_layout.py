@@ -116,7 +116,8 @@ CASES = [
     ("takeaway", Slide(7, "takeaway", "Measure queue time first",
                        "It is almost always larger than build time, and it is usually cheaper to fix.")),
     ("cta", Slide(8, "cta", "What is the slowest step in your pipeline?",
-                  "Tell us below. We read every one.", "Save this for your next build review")),
+                  "Tell us below. We read every one.", "Save this for your next build review",
+                  "Name your slowest step")),
 ]
 
 failures = 0

@@ -343,4 +343,19 @@ with InstagramPublisher(
 assert token_calls == 1, f"a 190 must fail immediately, got {token_calls} attempts"
 ok("retry: unrelated errors still fail on the first attempt")
 
+# ── 16. no long dash character ever reaches the post ─────────────────────
+dashy = make_draft(2, caption="Slow CI — not hardware — was the problem.")
+dashy.hashtags = ["devops", "cicd"]
+assert "Slow CI - not hardware - was the problem." in dashy.full_caption, dashy.full_caption
+assert "—" not in dashy.full_caption and "–" not in dashy.full_caption
+# A slide read back from storage is flattened on the way in, which is what a
+# re-render draws; drafts written before the rule existed still carry em dashes.
+loaded = Slide.from_dict(
+    {"order": 1, "layout": "bullets", "headline": "Kubernetes — at scale",
+     "body": "queue depth – and why", "footer": "", "cta": "Ask — where the queue is"}
+)
+assert loaded.headline == "Kubernetes - at scale", loaded.headline
+assert "–" not in loaded.body and "—" not in loaded.cta
+ok("no long dash in the posted caption or in a restored slide")
+
 print("\nPUBLISHER TESTS PASSED")

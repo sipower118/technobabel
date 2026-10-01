@@ -240,6 +240,20 @@ assert timeout_attempt.reason.startswith("transient"), timeout_attempt.reason
 assert timeout_attempt.scope == "model", timeout_attempt.scope
 print(f"11. timeout        OK  SDK bounded at {GENAI_TIMEOUT_MS}ms, timeouts transient")
 
+# ── 12. the closing cta is parsed, and no long dash survives parsing ─────
+sample_cta = json.loads(json.dumps(SAMPLE))
+sample_cta["slides"][3]["cta"] = "Ask where your queue is hiding"
+sample_cta["slides"][1]["headline"] = "42% of build time — waiting on a cache"
+sample_cta["caption"] = "Slow CI is an ownership problem – not hardware."
+cta_post = _parse(json.dumps(sample_cta), max_slides=8)
+assert cta_post.slides[3].cta == "Ask where your queue is hiding", cta_post.slides[3].cta
+# A slide with no cta stays empty: the renderer draws no pill for it rather
+# than falling back to a canned line.
+assert cta_post.slides[0].cta == "", cta_post.slides[0].cta
+assert "—" not in cta_post.slides[1].headline, cta_post.slides[1].headline
+assert "–" not in cta_post.caption, cta_post.caption
+print("12. cta + dashes    OK  cta parsed, long dashes flattened")
+
 store.close()
 import os
 os.remove("data/_test_ladder.sqlite3")

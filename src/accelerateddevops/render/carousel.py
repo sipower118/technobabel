@@ -227,25 +227,6 @@ def _draw_footer(
     )
 
 
-def _progress_dots(
-    draw: ImageDraw.ImageDraw, palette: Palette, index: int, total: int
-) -> None:
-    """Dot track showing position in the carousel - drives swipe-through."""
-    if total <= 1:
-        return
-    size, gap = 12, 12
-    total_w = total * size + (total - 1) * gap
-    x = (CANVAS_W - total_w) // 2
-    y = CANVAS_H - MARGIN - 6
-    for i in range(total):
-        active = i <= index
-        colour = palette.accent if active else palette.surface
-        draw.rounded_rectangle(
-            [x, y, x + size, y + size], radius=size // 2, fill=colour
-        )
-        x += size + gap
-
-
 # ── layouts ──────────────────────────────────────────────────────────────
 
 
@@ -621,22 +602,25 @@ def _layout_cta(
         draw_block(draw, MARGIN, y, bwrapped, bfont, palette.muted)
         y += bh + 40
 
-    # CTA pill, anchored near the bottom.
-    pill_text = slide.cta or "Save this for the next incident review."
-    cfont = fonts.load("body_bold", 34)
-    tw = text_width(draw, pill_text, cfont)
-    pill_w = min(CONTENT_W, tw + 72)
-    pill_h = 74
-    pill_y = min(bottom - pill_h - 10, y + 30)
-    draw.rounded_rectangle(
-        [MARGIN, pill_y, MARGIN + pill_w, pill_y + pill_h],
-        radius=pill_h // 2,
-        outline=palette.accent,
-        width=3,
-    )
-    draw.text(
-        (MARGIN + 36, pill_y + 19), pill_text, font=cfont, fill=palette.accent
-    )
+    # CTA pill, anchored near the bottom. Drawn only when the model named the
+    # action: a closing line that ignores the story is worse than none, and the
+    # headline plus body already carry the slide.
+    pill_text = slide.cta.strip()
+    if pill_text:
+        cfont = fonts.load("body_bold", 34)
+        tw = text_width(draw, pill_text, cfont)
+        pill_w = min(CONTENT_W, tw + 72)
+        pill_h = 74
+        pill_y = min(bottom - pill_h - 10, y + 30)
+        draw.rounded_rectangle(
+            [MARGIN, pill_y, MARGIN + pill_w, pill_y + pill_h],
+            radius=pill_h // 2,
+            outline=palette.accent,
+            width=3,
+        )
+        draw.text(
+            (MARGIN + 36, pill_y + 19), pill_text, font=cfont, fill=palette.accent
+        )
 
 
 LAYOUTS = {
@@ -676,7 +660,6 @@ def render_slide(
     layout = slide.layout if slide.layout in LAYOUTS else "bullets"
     LAYOUTS[layout](canvas, slide, palette, top, bottom)
 
-    _progress_dots(canvas.draw, palette, index, total)
     return image
 
 

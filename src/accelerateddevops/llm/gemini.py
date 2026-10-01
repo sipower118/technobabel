@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from google import genai
 from google.genai import types
 
-from ..models import Slide
+from ..models import Slide, plain_dashes
 from ..store import Store
 from .base import GeneratedPost, LLMUnavailable
 from .prompts import build_prompt
@@ -321,6 +321,7 @@ _SLIDE_SCHEMA = {
         "headline": {"type": "string"},
         "body": {"type": "string"},
         "footer": {"type": "string"},
+        "cta": {"type": "string"},
     },
     "required": ["order", "layout", "headline"],
 }
@@ -374,9 +375,10 @@ def _parse(raw: str, max_slides: int) -> GeneratedPost:
         Slide(
             order=int(s.get("order") or i + 1),
             layout=str(s.get("layout") or "bullets").lower().strip(),
-            headline=str(s.get("headline") or "").strip(),
-            body=str(s.get("body") or "").strip(),
-            footer=str(s.get("footer") or "").strip(),
+            headline=plain_dashes(str(s.get("headline") or "").strip()),
+            body=plain_dashes(str(s.get("body") or "").strip()),
+            footer=plain_dashes(str(s.get("footer") or "").strip()),
+            cta=plain_dashes(str(s.get("cta") or "").strip()),
         )
         for i, s in enumerate(data.get("slides") or [])
         if str(s.get("headline") or "").strip()
@@ -396,7 +398,7 @@ def _parse(raw: str, max_slides: int) -> GeneratedPost:
     # Slide 1 is always the cover; a model that mislabels it still looks right.
     slides[0].layout = "cover"
     if not slides[0].body:
-        slides[0].body = str(data.get("subhook") or "").strip()
+        slides[0].body = plain_dashes(str(data.get("subhook") or "").strip())
 
     hashtags = []
     for tag in data.get("hashtags") or []:
@@ -405,11 +407,11 @@ def _parse(raw: str, max_slides: int) -> GeneratedPost:
             hashtags.append(normalised)
 
     return GeneratedPost(
-        hook=str(data.get("hook") or slides[0].headline).strip(),
-        subhook=str(data.get("subhook") or "").strip(),
-        caption=str(data.get("caption") or "").strip(),
+        hook=plain_dashes(str(data.get("hook") or slides[0].headline).strip()),
+        subhook=plain_dashes(str(data.get("subhook") or "").strip()),
+        caption=plain_dashes(str(data.get("caption") or "").strip()),
         hashtags=hashtags[:30],
-        alt_text=str(data.get("alt_text") or "").strip(),
+        alt_text=plain_dashes(str(data.get("alt_text") or "").strip()),
         slides=slides,
-        sources_note=str(data.get("sources_note") or "").strip(),
+        sources_note=plain_dashes(str(data.get("sources_note") or "").strip()),
     )
