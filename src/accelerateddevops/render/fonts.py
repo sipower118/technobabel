@@ -85,7 +85,16 @@ def font_path(role: str) -> str:
     """Absolute path to the best available font for a role."""
     index = _index()
     for name in FONT_CANDIDATES.get(role, FONT_CANDIDATES["body"]):
-        hit = index.get(Path(name).name.lower()) or index.get(str(Path(name)).lower())
+        candidate = Path(name)
+        # _index() is keyed on bare filenames, so the basename lookup already
+        # covers both kinds of candidate and a second `get` on the whole path
+        # can never match. What is still worth trying is the candidate itself:
+        # the absolute entries above exist precisely so they work without the
+        # index having seen them. (`Path` has no `.lower()`, so this cannot be
+        # written as a second `get` either.)
+        hit = index.get(candidate.name.lower()) or (
+            candidate.resolve() if candidate.is_file() else None
+        )
         if hit and Path(hit).is_file():
             return str(hit)
 
@@ -100,13 +109,17 @@ def font_path(role: str) -> str:
 
 
 @lru_cache(maxsize=512)
-def load(role: str, size: int) -> ImageFont.FreeTypeFont:
+def load(role: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """Load a cached font at a given pixel size."""
     path = font_path(role)
     try:
         return ImageFont.truetype(path, size)
     except OSError:
-        # Variable/default font path: Pillow >= 10.1 supports sized defaults.
+        # Pillow >= 10.1 has a sized default (pyproject pins >= 10.3). Pillow
+        # declares its return as `FreeTypeFont | ImageFont`, so the signature
+        # has to admit both even though a non-None size always takes the
+        # FreeType branch. Every caller only hands this to ImageDraw, whose
+        # `font=` accepts the same union.
         return ImageFont.load_default(size=size)
 
 

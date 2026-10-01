@@ -1,0 +1,43 @@
+name: Publish assets to gh-pages
+
+on:
+  workflow_call:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout gh-pages into .pages
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: .pages
+
+      - name: Ensure output folder exists
+        run: mkdir -p .pages/output
+
+      - name: Copy rendered assets
+        run: |
+          if [ -d "data/output" ]; then
+            cp -r data/output/* .pages/output/
+          else
+            echo "No output folder found, skipping."
+          fi
+
+      - name: Commit assets
+        run: |
+          cd .pages
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add output || true
+
+          if git diff --cached --quiet; then
+            echo "No asset changes to commit."
+            exit 0
+          fi
+
+          git commit -m "generate: publish rendered assets"
+          git push origin gh-pages

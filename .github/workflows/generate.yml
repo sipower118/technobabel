@@ -51,6 +51,9 @@ jobs:
       - name: Generate
         run: uv run accelerated-devops generate --posts "${{ inputs.posts || 2 }}"
 
+      - name: Publish assets
+        uses: ./.github/actions/asset_publish
+
       - name: Show what is waiting for review
         run: uv run accelerated-devops list
 
